@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.4
+
+Restores are now safe to hand over between instances and across an upgrade.
+
+* An interrupted pause resets the whole restore policy (`intent: "mount"`, `epoch: 0`), so it is
+  mounted and never sends a continuation.
+* When a merged crash plan could not be written to disk, resume restores that in-memory plan, which
+  holds both the old and the newly found sessions. The older `pending.json` no longer wins and hides
+  half the work.
+* `heartbeat.release()` restores a full lifecycle: the periodic sample is re-armed, `stopped` is
+  cleared, and state events can persist again. Previously the file stayed frozen after a repaired
+  write failure.
+* A pre-epoch plan keeps its original continuation request id (`…:continue:<session>`), so upgrading
+  cannot queue a second copy of a message the old version already admitted.
+* A restore that loses ownership (plugin reload) stops before publishing, consuming or clearing. It
+  also compares the plan's actual work, not only its id, so additions from a newer press survive.
+* A goal whose checkpoint cannot be written keeps the plan on disk with the failure named, instead of
+  silently skipping the goal on the next boot.
+* The button hint combines the error with the focused item for partial pause/restore.
+
 ## 0.4.3
 
 - The dot now means one thing: something is waiting on you (a paused plan with commands that will not restart, or a stop/restore that failed). A clean idle page has no dot, and killed jobs live in the restore record instead of becoming a permanent red light.
@@ -20,9 +40,9 @@ A stop that could not finish no longer traps the button, and the dot stops lying
 
 The crash path is now a first-class restore path, and a dead button after a restart is fixed.
 
-* Routes are registered synchronously while `apply` runs. The web server freezes its route table
-  when it starts, so registering after `hydrate()` left the button answering 404 on a fresh boot.
-  Handlers now wait for hydration instead of the route table waiting for it.
+* Routes are registered synchronously while `apply` runs. Registration itself is not the problem —
+  the server keeps a live route table — but registering after hydration meant the button could be
+  pressed before the table had an entry. Handlers now wait for hydration instead.
 * A crash plan is written to `pending.json` before the heartbeat is replaced. If that write fails,
   the heartbeat is held and the previous `running.json` is left untouched, so the next boot still
   sees the work.

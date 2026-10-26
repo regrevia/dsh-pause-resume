@@ -591,3 +591,151 @@ test('a failed goal pause or job kill makes the stop partial and names the item'
   assert.equal(engine.describe().error, 'pause-partial')
   assert.deepEqual(store.state.plan.attention.map((row) => row.id), ['s1', 'j1'])
 })
+
+// v0.4.4: handover constraints between the engine, the durable store and the heartbeat.
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createStore } from '../lib/snapshot.js'
+import { createHeartbeat } from '../lib/heartbeat.js'
+
+function tempDir() {
+  return mkdtempSync(join(tmpdir(), 'dsh-pause-resume-'))
+}
+
+test('an interrupted pause resets the whole restore policy, not only the legacy fields', async () => {
+  const plan = {
+    version: 3, planId: 'pause-x', status: 'pausing', source: 'pause', interrupted: true,
+    sessions: [{ sessionId: 's1', running: true, intent: 'continue', epoch: 1, lastTurn: 7 }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  const seen = []
+  const probe = fakeProbe()
+  probe.restoreSession = async (session) => {
+    seen.push(session)
+    return { status: 'restored', detail: 'attached' }
+  }
+  const { engine } = engineFor({ store, probe })
+  await engine.hydrate()
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.deepEqual(seen.map((row) => [row.intent, row.epoch, row.running]), [['mount', 0, false]])
+})
+
+test('a merged crash plan is the one resumed after its write failed, so no new session is lost', async () => {
+  const pending = {
+    version: 3, planId: 'crash-1', source: 'crash', status: 'paused',
+    sessions: [{ sessionId: 'old-s1', intent: 'mount', epoch: 0, running: false, crash: true }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ failPending: true })
+  store.state.pending = pending
+  const probe = fakeProbe()
+  probe.crashPlan = (residue, options) => ({
+    version: 3, planId: options.planId, source: 'crash', status: 'paused',
+    sessions: residue.sessions.map((row) => ({ sessionId: row.sessionId, intent: 'mount', epoch: 0, running: false, crash: true })),
+    goals: [], jobs: [], attention: [],
+  })
+  const { engine } = engineFor({ store, probe })
+  await engine.hydrate({ residue: { sessions: [{ sessionId: 'old-s1' }, { sessionId: 'new-s2' }], at: 9 } })
+  assert.equal(store.state.pending.planId, 'crash-1')
+  assert.equal(engine.describe().action, 'resume')
+
+  store.state.failPending = false
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.deepEqual(outcome.summary.restored, ['session old-s1', 'session new-s2'])
+  assert.equal(store.state.pending, null)
+})
+
+test('release() restores the heartbeat lifecycle: timer and state events write again', async () => {
+  const dir = tempDir()
+  try {
+    let running = ['s0']
+    // A long interval keeps the periodic tick out of the way, so the state-event path is the one
+    // that has to write after the release; the next case covers the periodic tick itself.
+    const beat = createHeartbeat({ dir, bootId: 'boot-1', intervalMs: 10000, listRunning: () => running, log: () => {} })
+    beat.start()
+    beat.hold()
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    running = ['s1']
+    beat.release()
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    const sampled = JSON.parse(readFileSync(join(dir, 'running.json'), 'utf8'))
+    // The forced sample landed, so the heartbeat describes this process again.
+    assert.deepEqual(sampled.sessions.map((row) => row.sessionId), ['s1'])
+    running = ['s2']
+    beat.note(['s2'])
+    await new Promise((resolve) => setTimeout(resolve, 260))
+    const noted = JSON.parse(readFileSync(join(dir, 'running.json'), 'utf8'))
+    // State events can persist too; `stopped` no longer swallows them.
+    assert.deepEqual(noted.sessions.map((row) => row.sessionId), ['s2'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a restore that lost its instance cannot consume a plan another press merged', async () => {
+  const plan = {
+    version: 3, planId: 'p1', source: 'pause', status: 'paused',
+    sessions: [{ sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe()
+  let releaseMount = null
+  probe.restoreSession = () => new Promise((resolve) => {
+    releaseMount = () => resolve({ status: 'restored', detail: 'attached' })
+  })
+  const { createEngine } = await import('../lib/engine.js')
+  const old = createEngine({ store, probe, epoch: nextEpoch(), now: () => 1700000000000, bootId: 'boot-1', log: () => {} })
+  const resuming = old.resume()
+  await new Promise((resolve) => setImmediate(resolve))
+  nextEpoch()
+  store.state.plan = {
+    ...plan,
+    sessions: [...plan.sessions, { sessionId: 's2', intent: 'mount', epoch: 0, running: false, lastTurn: null }],
+    goals: [{ sessionId: 's2', goalId: 'g2', revision: 3 }],
+  }
+  releaseMount()
+  const outcome = await resuming
+  assert.equal(outcome.status, 'partial')
+  assert.equal(store.state.consumed, null)
+  assert.deepEqual(store.state.plan.sessions.map((row) => row.sessionId), ['s1', 's2'])
+})
+
+test('a goal whose checkpoint cannot be written keeps the plan instead of skipping it', async () => {
+  const plan = {
+    version: 3, planId: 'p2', source: 'pause', status: 'paused',
+    sessions: [], goals: [{ sessionId: 's1', goalId: 'g1', revision: 3 }], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe()
+  probe.restoreGoal = async () => ({ status: 'restored', detail: 'armed', revision: 4 })
+  const { engine } = engineFor({ store, probe })
+  store.state.failWrite = true
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'partial')
+  assert.equal(store.state.consumed, null)
+  assert.equal(engine.describe().phase, 'paused')
+  assert.match(outcome.summary.failed.join(' '), /checkpoint not saved/u)
+})
+
+test('release() re-arms the periodic sample, not only the state-event path', async () => {
+  const dir = tempDir()
+  try {
+    let running = ['s1']
+    const beat = createHeartbeat({ dir, bootId: 'boot-1', intervalMs: 40, listRunning: () => running, log: () => {} })
+    beat.start()
+    beat.hold()
+    running = ['s2']
+    beat.release()
+    running = ['s3']
+    await new Promise((resolve) => setTimeout(resolve, 220))
+    const rows = JSON.parse(readFileSync(join(dir, 'running.json'), 'utf8'))
+    assert.deepEqual(rows.sessions.map((row) => row.sessionId), ['s3'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

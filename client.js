@@ -140,8 +140,9 @@ window.__ModuleLoader__.load({
 
     /** The one sentence behind the dot, in the tooltip only: the button itself stays a glyph. */
     function hintOf(state) {
-      if (state.error === 'restore-partial') return COPY.partial
-      if (state.error !== null && state.error !== undefined) return COPY.error
+      const focus = typeof state.focus === 'string' && state.focus !== '' ? state.focus : ''
+      if (state.error === 'restore-partial') return focus === '' ? COPY.partial : `${COPY.partial}: ${focus}`
+      if (state.error !== null && state.error !== undefined) return focus === '' ? COPY.error : `${COPY.error}: ${focus}`
       if ((state.attention ?? 0) > 0) {
         return typeof state.focus === 'string' && state.focus !== '' ? `${COPY.attention}: ${state.focus}` : COPY.attention
       }

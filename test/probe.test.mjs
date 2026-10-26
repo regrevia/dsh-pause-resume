@@ -209,6 +209,17 @@ test('restoreSession() continues a stopped turn with one visible, idempotent mes
   assert.equal(agent.status, 'running')
 })
 
+test('a pre-epoch plan keeps its legacy continuation id through an upgrade', async () => {
+  const agent = { id: 's1', status: 'idle', phase: { lastTurn: 4 } }
+  const fake = harness({ agents: [agent] })
+  const probe = createProbe(fake.registry)
+  const outcome = await probe.restoreSession({ sessionId: 's1', intent: 'continue', epoch: 0, running: true, lastTurn: 4 }, { plan: { planId: 'pause-1' } })
+  assert.equal(outcome.continued, true)
+  const prompt = fake.calls.find((call) => call[0] === 'prompt')
+  // The id the old version may already have admitted, not a new suffixed operation.
+  assert.equal(prompt[2], 'pause-1:continue:s1')
+})
+
 test('restoreSession() does not resend after a turn already advanced', async () => {
   const fake = harness({ agents: [{ id: 's1', status: 'idle', phase: { lastTurn: 9 } }] })
   const probe = createProbe(fake.registry)

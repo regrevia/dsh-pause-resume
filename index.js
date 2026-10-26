@@ -7,7 +7,7 @@ import { createHeartbeat } from './lib/heartbeat.js'
 import { createProbe, listRunning } from './lib/probe.js'
 
 export const name = 'dsh-pause-resume'
-export const VERSION = '0.4.3'
+export const VERSION = '0.4.4'
 
 const BASE_PATH = '/dsh-pause-resume'
 const BUTTON_HEADER = 'x-dsh-pause-resume'
@@ -135,8 +135,8 @@ function serve(ctx, engine, heartbeat, options, ready) {
     if (read === true ? sameOrigin(req, allowRemote) === false : buttonAllowed(req, allowRemote) === false) {
       return sendJson(res, 403, { status: 'forbidden' })
     }
-    // Routes are registered synchronously so the server freezes them before it starts. Hydration
-    // may still be reading crash residue, so every press waits for it instead of acting blind.
+    // Routes are registered synchronously so no press can arrive before the table has them.
+    // Hydration may still be reading crash residue, so every press waits for it instead of acting blind.
     if (ready !== undefined) await ready
     if (disposed === true) return sendJson(res, 503, { status: 'starting' })
     return handler(req, res)
@@ -145,7 +145,7 @@ function serve(ctx, engine, heartbeat, options, ready) {
     [
       `${BASE_PATH}/state`,
       route(async (req, res) => {
-        sendJson(res, 200, engine.describe())
+        sendJson(res, 200, { ...engine.describe(), version: VERSION })
       }, true),
     ],
     [
@@ -154,7 +154,7 @@ function serve(ctx, engine, heartbeat, options, ready) {
         const outcome = await engine.pause()
         log(`pause: ${outcome.status}${outcome.status === 'busy' ? ` (${outcome.phase})` : ''}`)
         if (outcome.status === 'paused' || outcome.status === 'partial') heartbeat.release()
-        sendJson(res, 200, { ...engine.describe(), outcome })
+        sendJson(res, 200, { ...engine.describe(), outcome, version: VERSION })
       }, false),
     ],
     [
@@ -162,7 +162,7 @@ function serve(ctx, engine, heartbeat, options, ready) {
       route(async (req, res) => {
         const outcome = await engine.resume()
         log(`resume: ${outcome.status}`)
-        sendJson(res, 200, { ...engine.describe(), outcome })
+        sendJson(res, 200, { ...engine.describe(), outcome, version: VERSION })
       }, false),
     ],
   ]
@@ -275,8 +275,8 @@ export function apply(ctx, config = {}) {
     log(`cannot follow agent events: ${error?.message ?? error}`)
   }
 
-  // The server freezes its route table when it starts, so routes must be registered while `apply`
-  // is still synchronous. Hydration is asynchronous; the handlers wait on this promise.
+  // Routes must be registered while `apply` is still synchronous, so a press can never arrive
+  // before the table has an entry. Hydration is asynchronous; the handlers wait on this promise.
   let releaseReady = () => {}
   const ready = new Promise((resolve) => {
     releaseReady = resolve

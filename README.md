@@ -25,7 +25,9 @@ last press left something for a person to look at.
 
 Schedules are not paused: the schedule service has no disable operation, only delete, and deleting a
 person's schedule to pause it is not a trade this plugin makes. A schedule that fires while paused
-starts a turn; the button then shows ⏸ again, truthfully.
+starts a turn, but the button keeps showing ▶ while a pause plan waits: a pending plan owns the main
+action, so the only honest next step is to finish the restore. The schedule appears in that restore
+summary like any other work started after the press.
 
 ## How resume works
 
