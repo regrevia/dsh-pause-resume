@@ -67,6 +67,10 @@ function fakeProbe(live = { sessions: [], goals: [], jobs: [], readable: true },
       calls.push(['session', session.sessionId, session.running])
       return { status: 'restored', detail: 'attached' }
     },
+    prepareGoal: async (goal) => {
+      calls.push(['prepareGoal', goal.goalId])
+      return { status: 'ready', revision: Number.isSafeInteger(goal.revision) ? goal.revision : 0 }
+    },
     restoreGoal: async (goal) => {
       calls.push(['goal', goal.goalId])
       return { status: 'restored', detail: 'armed' }
@@ -264,7 +268,7 @@ test('resume() journals each restored item and consumes the plan only when every
   assert.equal(store.state.consumed.plan.planId, 'p1')
   assert.equal(store.state.journal.size, 0)
   assert.deepEqual(outcome.summary.restored.sort(), ['goal g1', 'session s1'])
-  assert.deepEqual(probe.calls.map((call) => call[0]), ['session', 'goal'])
+  assert.deepEqual(probe.calls.map((call) => call[0]), ['session', 'prepareGoal', 'goal'])
   assert.equal(engine.phase, 'idle')
   assert.equal(engine.describe().action, 'none')
 })
@@ -298,7 +302,7 @@ test('resume() keeps the plan and retries only the item that failed', async () =
   assert.equal(second.status, 'resumed')
   // The live Harness decides what still needs work, not an old journal: every item is checked
   // again, and the already-restored ones answer "skipped" from their own state.
-  assert.deepEqual(probe.calls.slice(probeCallsBefore).map((call) => call[0]), ['session', 'session', 'goal'])
+  assert.deepEqual(probe.calls.slice(probeCallsBefore).map((call) => call[0]), ['session', 'session', 'prepareGoal', 'goal'])
   assert.equal(store.state.consumed.plan.planId, 'p1')
 })
 
@@ -789,9 +793,11 @@ test('a resume that could not checkpoint a goal keeps the restore intent for the
   assert.equal(outcome.status, 'partial')
   assert.equal(store.state.consumed, null)
   assert.match(outcome.summary.failed.join(' '), /checkpoint not saved/u)
+  assert.match(first.describe().result.failed.join(' '), /checkpoint not saved/u)
   const saved = store.state.plan.goals.find((row) => row.goalId === 'g1')
   assert.equal(saved.armedRevision, null)
   assert.equal(saved.pendingRestore.revision, 3)
+  assert.equal(saved.pendingRestore.expect, 4)
 
   // Next boot: the intent on disk is what proves this goal is ours to arm again.
   const second = fakeProbe()
@@ -906,4 +912,115 @@ test('distinct restore attention strings are counted separately and old job nois
   const state = engine.describe()
   assert.equal(state.attention, 2)
   assert.equal(state.focus, 's1')
+})
+
+test('a partial restore releases the heartbeat once the merged plan is durable', async () => {
+  const plan = {
+    version: 3, planId: 'pause-held', status: 'paused', source: 'pause',
+    sessions: [{ sessionId: 's1', intent: 'continue', epoch: 0, running: true, lastTurn: 1 }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan, failWrite: true })
+  const held = { count: 0, hold() { this.count += 1 }, release() { held.released = (held.released ?? 0) + 1 } }
+  const probe = fakeProbe()
+  const { engine } = engineFor({ store, probe, heartbeat: held })
+  const hydrated = await engine.hydrate({ residue: { sessions: [{ sessionId: 's2' }], at: 2 } })
+  assert.equal(hydrated.durable, false)
+  assert.equal(held.count, 1)
+
+  store.state.failWrite = false
+  probe.restoreSession = async (session) => {
+    probe.calls.push(['session', session.sessionId])
+    if (session.sessionId === 's2') return { status: 'failed', detail: 'MOUNT_FAILED' }
+    return { status: 'restored', detail: 'attached' }
+  }
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'partial')
+  assert.equal(held.released, 1)
+  assert.deepEqual(store.state.plan.sessions.map((row) => row.sessionId), ['s1', 's2'])
+
+  const next = engineFor({ store, heartbeat: held, bootId: 'b2' })
+  await next.engine.hydrate({ residue: { sessions: [{ sessionId: 's3' }], at: 3 } })
+  assert.deepEqual(store.state.plan.sessions.map((row) => row.sessionId), ['s1', 's2', 's3'])
+  assert.equal(store.state.plan.sessions.find((row) => row.sessionId === 's2').intent, 'mount')
+})
+
+test('a goal-only session keeps its continuation cycle when another turn is captured', async () => {
+  const plan = {
+    version: 3, planId: 'pause-goal-only', status: 'paused', source: 'pause',
+    sessions: [{ sessionId: 's1', intent: 'continue', epoch: 1, running: true, lastTurn: 2 }],
+    goals: [{ sessionId: 's1', goalId: 'g1', revision: 2 }], jobs: [], attention: [],
+  }
+  const live = {
+    readable: true,
+    sessions: [{ sessionId: 's1', running: false, lastTurn: 2 }, { sessionId: 's3', running: true, lastTurn: 0 }],
+    goals: [{ sessionId: 's1', goalId: 'g1', revision: 2 }],
+    jobs: [],
+  }
+  const probe = fakeProbe(live, {
+    canceled: ['s3'],
+    pausedGoals: [{ sessionId: 's1', goalId: 'g1', pausedRevision: 3 }],
+  })
+  const { store, engine } = engineFor({ store: fakeStore({ plan }), probe })
+  assert.equal((await engine.pause()).status, 'paused')
+  const rows = new Map(store.state.plan.sessions.map((row) => [row.sessionId, row]))
+  assert.equal(rows.get('s1').epoch, 1)
+  assert.equal(rows.get('s3').epoch, 1)
+})
+
+test('a smaller pending copy is cleared as covered, not resurrected as another restore', async () => {
+  const plan = {
+    version: 3, planId: 'pause-grown', status: 'paused', source: 'pause',
+    sessions: [
+      { sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null },
+      { sessionId: 's2', intent: 'mount', epoch: 0, running: false, lastTurn: null },
+    ],
+    goals: [], jobs: [], attention: [],
+  }
+  const pending = {
+    version: 3, planId: 'pause-grown', status: 'paused', source: 'crash',
+    sessions: [{ sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  store.state.pending = pending
+  const { engine } = engineFor({ store })
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.equal(store.state.pending, null)
+  assert.equal(store.state.consumed.plan.planId, 'pause-grown')
+  assert.deepEqual(store.state.consumed.plan.sessions.map((row) => row.sessionId), ['s1', 's2'])
+})
+
+test('a pending copy with work the snapshot does not cover is not deleted', async () => {
+  const plan = {
+    version: 3, planId: 'pause-grown', status: 'paused', source: 'pause',
+    sessions: [{ sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null }],
+    goals: [], jobs: [], attention: [],
+  }
+  const pending = {
+    version: 3, planId: 'pause-grown', status: 'paused', source: 'crash',
+    sessions: [
+      { sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true },
+      { sessionId: 's2', intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true },
+    ],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  store.state.pending = pending
+  const { engine } = engineFor({ store })
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.notEqual(store.state.pending, null)
+})
+
+test('a goal already proven by its exact armed revision is re-armed without a new intent', async () => {
+  const plan = {
+    version: 3, planId: 'pause-armed', status: 'paused', source: 'pause', sessions: [],
+    goals: [{ sessionId: 's1', goalId: 'g1', revision: 3, armedRevision: 4, pendingRestore: null }], jobs: [], attention: [],
+  }
+  const { probe, engine } = engineFor({ store: fakeStore({ plan }) })
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.deepEqual(probe.calls.map((call) => call[0]), ['goal'])
 })

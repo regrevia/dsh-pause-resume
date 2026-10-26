@@ -393,7 +393,7 @@ test('restoreGoal() re-arms an active goal that its restore intent owns after a 
   })
   const probe = createProbe(fake.registry)
   const outcome = await probe.restoreGoal(
-    { sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: null, pendingRestore: { revision: 4, at: 1 } },
+    { sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: null, pendingRestore: { revision: 4, expect: 5, at: 1 } },
     { plan: { planId: 'pause-1' } },
   )
   assert.equal(outcome.status, 'restored')
@@ -435,4 +435,61 @@ test('a reload during a cold mount stops the old probe before it reports or prom
   const outcome = await pending
   assert.deepEqual(outcome, { status: 'reloaded' })
   assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
+})
+
+test('restoreGoal() refuses an active goal edited after this operation produced it', async () => {
+  const fake = harness({
+    agents: [{ id: 's1', status: 'idle' }],
+    goals: { s1: { id: 'g1', revision: 10, phase: 'active', activation: 'disarmed' } },
+  })
+  const probe = createProbe(fake.registry)
+  const outcome = await probe.restoreGoal(
+    { sessionId: 's1', goalId: 'g1', revision: 8, pendingRestore: { revision: 8, expect: 9, at: 1 } },
+    { plan: { planId: 'pause-1' } },
+  )
+  assert.equal(outcome.status, 'attention')
+  assert.equal(fake.calls.some((call) => call[0] === 'goals.resume'), false)
+})
+
+test('restoreGoal() accepts exactly the revision its own resume produced', async () => {
+  const fake = harness({
+    agents: [{ id: 's1', status: 'idle' }],
+    goals: { s1: { id: 'g1', revision: 9, phase: 'active', activation: 'disarmed' } },
+  })
+  const probe = createProbe(fake.registry)
+  const outcome = await probe.restoreGoal(
+    { sessionId: 's1', goalId: 'g1', revision: 8, pendingRestore: { revision: 8, expect: 9, at: 1 } },
+    { plan: { planId: 'pause-1' } },
+  )
+  assert.equal(outcome.status, 'restored')
+  assert.equal(outcome.revision, 10)
+  assert.deepEqual(fake.calls.filter((call) => call[0] === 'goals.resume'), [['goals.resume', 's1', 'g1', 9]])
+})
+
+test('prepareGoal() verifies the paused state before any intent is written', async () => {
+  const fake = harness({
+    agents: [{ id: 's1', status: 'idle' }, { id: 's2', status: 'idle' }],
+    goals: {
+      s1: { id: 'g1', revision: 8, phase: 'paused', activation: 'disarmed' },
+      s2: { id: 'g2', revision: 9, phase: 'paused', activation: 'disarmed' },
+    },
+  })
+  const probe = createProbe(fake.registry)
+  assert.deepEqual(await probe.prepareGoal({ sessionId: 's1', goalId: 'g1', revision: 8 }), { status: 'ready', revision: 8 })
+  assert.equal((await probe.prepareGoal({ sessionId: 's2', goalId: 'g2', revision: 8 })).status, 'skipped')
+  assert.equal(fake.calls.some((call) => call[0] === 'goals.resume'), false)
+})
+
+test('restoreGoal() refuses a paused goal edited after its restore intent was written', async () => {
+  const fake = harness({
+    agents: [{ id: 's1', status: 'idle' }],
+    goals: { s1: { id: 'g1', revision: 9, phase: 'paused', activation: 'disarmed' } },
+  })
+  const probe = createProbe(fake.registry)
+  const outcome = await probe.restoreGoal(
+    { sessionId: 's1', goalId: 'g1', revision: 8, pendingRestore: { revision: 8, expect: 9, at: 1 } },
+    { plan: { planId: 'pause-1' } },
+  )
+  assert.equal(outcome.status, 'attention')
+  assert.equal(fake.calls.some((call) => call[0] === 'goals.resume'), false)
 })

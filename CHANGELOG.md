@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.7
+
+Four restore-boundary bugs and two reporting gaps found in the 0.4.6 review.
+
+* A pause plan whose crash merge could not be written released the heartbeat only when the whole
+  restore finished. A later partial restore left the old process record protected, so work started
+  after the failed write was missing from the next boot. The heartbeat is now released as soon as
+  the merged plan itself is durable, and stays held only while that write still fails.
+* A goal restore intent recorded the revision from before the resume and then accepted any later
+  revision as its own. A person editing the goal after a failed checkpoint was silently resumed on
+  the next boot. The intent now stores the revision this process actually read plus the exact
+  revision its own resume produces; only that state is re-armed, and every later edit becomes
+  restore attention instead of a resume.
+* A pause bumped the continuation cycle for every captured session, including one that only carried
+  a goal and was mounted rather than continued. That changed an already admitted request id and the
+  official dedupe admitted a second message. Only sessions whose running turn was actually captured
+  get a new cycle.
+* A migrated crash plan cleared `pending.json` only when its content still matched the snapshot
+  exactly. A cleanup that failed and then saw the snapshot grow left the old copy behind, and the
+  next boot offered the same restore again. Completion now clears a pending copy recorded as the
+  migration source when every item in it is covered by the completed plan; anything extra survives.
+* A goal checkpoint failure returned before publishing the restore summary, so the paused page could
+  omit the failed item. Every partial return now publishes `result`, which also gives the dot its
+  focused item.
+
 ## 0.4.6
 
 * Restore attention rows are deduplicated by their own text, so two different items no longer
