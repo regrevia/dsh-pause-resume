@@ -1,0 +1,62 @@
+{
+  "name": "dsh-pause-resume",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "One header button stops every running turn and goal, writes a snapshot, and puts the same work back on the next boot; the button's shape is the only status.",
+  "license": "MIT",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "lib/*.js",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "pause",
+    "resume",
+    "snapshot",
+    "crash-recovery"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/regrevia/dsh-pause-resume.git"
+  },
+  "homepage": "https://github.com/regrevia/dsh-pause-resume#readme",
+  "bugs": {
+    "url": "https://github.com/regrevia/dsh-pause-resume/issues"
+  },
+  "engines": {
+    "dsh": ">=0.2.0-rc.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "audit": "eslint --no-config-lookup --rule '{\"no-undef\":\"error\",\"no-unused-vars\":[\"error\",{\"args\":\"none\",\"caughtErrors\":\"none\"}]}' --global window --global performance --global document --global navigator --global location --global sessionStorage --global localStorage --global fetch --global Response --global Request --global URL --global URLSearchParams --global AbortController --global CustomEvent --global Event --global setTimeout --global clearTimeout --global setInterval --global clearInterval --global requestAnimationFrame --global queueMicrotask --global structuredClone --global Buffer --global process --global console index.js client.js lib/*.js"
+  },
+  "devDependencies": {
+    "eslint": "9.39.0"
+  }
+}
