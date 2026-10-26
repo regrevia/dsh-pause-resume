@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.5
+
+A restore now leaves a durable record before every side effect, so a restart can finish it.
+
+* Before `goals.resume`, the plan records `pendingRestore` and writes it to disk. If the process dies
+  after the goal was armed but before the checkpoint was saved, the next boot sees the active,
+  disarmed goal and the intent that proves it is ours to re-arm. A goal is no longer reported as
+  `skipped` with an empty attention list after such a restart.
+* A goal whose state cannot be read is a retryable failure (`goal unreadable: …`) instead of being
+  treated as absent and consumed. Only a readable paused goal is resumed, and an unreadable goal is
+  never counted as work the pause can stop.
+* A crash plan on boot sets `phase` to `idle` and offers `resume`; it no longer claims the page is
+  paused. The dot still names the crash work through attention.
+* A pause plan that ended up in the crash slot can complete its restore, clear the slot and release
+  the heartbeat. It no longer leaves the button in `resuming`/`busy`.
+* Restore attention survives the consumed plan and is shown with a focused item id even when no work
+  is live. Killed jobs stay excluded from the dot.
+* A new pause bumps the continuation epoch only for the sessions it captured; rows owned by another
+  plan keep their request id.
+* A reload during a cold mount stops the old probe before it reports or prompts, so stale side
+  effects from a replaced instance cannot reach a session.
+* A full restore journals each item only after its outcome, and the plan is consumed only when every
+  item settled.
+
 ## 0.4.4
 
 Restores are now safe to hand over between instances and across an upgrade.

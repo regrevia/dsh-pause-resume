@@ -719,7 +719,7 @@ test('a goal whose checkpoint cannot be written keeps the plan instead of skippi
   assert.equal(outcome.status, 'partial')
   assert.equal(store.state.consumed, null)
   assert.equal(engine.describe().phase, 'paused')
-  assert.match(outcome.summary.failed.join(' '), /checkpoint not saved/u)
+  assert.match(outcome.summary.failed.join(' '), /(restore intent|checkpoint) not saved/u)
 })
 
 test('release() re-arms the periodic sample, not only the state-event path', async () => {
@@ -738,4 +738,154 @@ test('release() re-arms the periodic sample, not only the state-event path', asy
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('a crash record merged into a pause plan survives a failed merge write', async () => {
+  const plan = {
+    version: 3, planId: 'pause-1', status: 'paused', source: 'pause',
+    sessions: [{ sessionId: 's1', intent: 'continue', epoch: 0, running: true, lastTurn: 1 }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan, failWrite: true })
+  const held = { count: 0, hold() { this.count += 1 }, release() { held.released = (held.released ?? 0) + 1 } }
+  const probe = fakeProbe()
+  probe.crashPlan = (residue, options) => ({
+    version: 3, planId: options.planId, source: 'crash', status: 'paused',
+    sessions: residue.sessions.map((row) => ({ sessionId: row.sessionId, intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true })),
+    goals: [], jobs: [], attention: [],
+  })
+  const { engine } = engineFor({ store, probe, heartbeat: held })
+  const hydrated = await engine.hydrate({ residue: { sessions: [{ sessionId: 's2' }], at: 2 } })
+  assert.equal(hydrated.durable, false)
+  assert.equal(held.count, 1)
+
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => call[1]), ['s1', 's2'])
+  assert.equal(held.released, 1)
+  assert.equal(store.state.plan, null)
+})
+
+test('a resume that could not checkpoint a goal keeps the restore intent for the next boot', async () => {
+  const plan = {
+    version: 3, planId: 'pause-2', status: 'paused', source: 'pause',
+    sessions: [], goals: [{ sessionId: 's1', goalId: 'g1', revision: 3, armedRevision: null }], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  const baseWrite = store.write
+  let writes = 0
+  store.write = (next) => {
+    writes += 1
+    if (writes === 2) return null
+    return baseWrite(next)
+  }
+  const probe = fakeProbe()
+  probe.restoreGoal = async (goal) => {
+    probe.calls.push(['goal', goal.goalId])
+    return { status: 'restored', detail: 'armed', revision: 4 }
+  }
+  const first = engineFor({ store, probe }).engine
+  const outcome = await first.resume()
+  assert.equal(outcome.status, 'partial')
+  assert.equal(store.state.consumed, null)
+  assert.match(outcome.summary.failed.join(' '), /checkpoint not saved/u)
+  const saved = store.state.plan.goals.find((row) => row.goalId === 'g1')
+  assert.equal(saved.armedRevision, null)
+  assert.equal(saved.pendingRestore.revision, 3)
+
+  // Next boot: the intent on disk is what proves this goal is ours to arm again.
+  const second = fakeProbe()
+  second.restoreGoal = async (goal) => {
+    second.calls.push(['goal', goal.goalId])
+    return { status: 'restored', detail: 'armed', revision: 5 }
+  }
+  const nextEngine = engineFor({ store, probe: second }).engine
+  await nextEngine.hydrate()
+  assert.equal(nextEngine.phase, 'paused')
+  const secondOutcome = await nextEngine.resume()
+  assert.equal(secondOutcome.status, 'resumed')
+  assert.equal(second.calls.filter((call) => call[0] === 'goal').length, 1)
+  assert.equal(store.state.consumed.plan.planId, 'pause-2')
+})
+
+test('restore attention stays visible after the plan is consumed and nothing is live', async () => {
+  const plan = {
+    version: 3, planId: 'pause-3', status: 'paused', source: 'pause',
+    sessions: [{ sessionId: 's1', intent: 'continue', epoch: 0, running: true, lastTurn: 2 }], goals: [], jobs: [], attention: [],
+  }
+  const probe = fakeProbe()
+  probe.restoreSession = async () => ({ status: 'attention', detail: 'continuation admitted, no turn started' })
+  const { engine } = engineFor({ store: fakeStore({ plan }), probe })
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.equal(engine.phase, 'idle')
+  const state = engine.describe()
+  assert.equal(state.action, 'none')
+  assert.equal(state.attention, 1)
+  assert.equal(state.focus, 's1')
+})
+
+test('a killed job is explained once and never becomes a permanent restore attention', async () => {
+  const plan = {
+    version: 3, planId: 'pause-4', status: 'paused', source: 'pause',
+    sessions: [], goals: [], jobs: [{ id: 'j1', owner: 's1', status: 'running' }], attention: [],
+  }
+  const { engine } = engineFor({ store: fakeStore({ plan }) })
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.equal(outcome.summary.jobsStopped.length, 1)
+  assert.equal(engine.describe().attention, 0)
+  assert.equal(engine.describe().action, 'none')
+})
+
+test('a pause plan left in the crash slot can finish its restore instead of staying busy', async () => {
+  const plan = {
+    version: 3, planId: 'pause-crash-slot', status: 'paused', source: 'pause',
+    sessions: [{ sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  store.state.pending = plan
+  store.state.plan = null
+  const held = { count: 0, hold() { this.count += 1 }, release() { held.released = (held.released ?? 0) + 1 } }
+  const { engine } = engineFor({ store, heartbeat: held })
+  await engine.hydrate()
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.equal(engine.phase, 'idle')
+  assert.notEqual(engine.describe().action, 'busy')
+  assert.equal(store.state.pending, null)
+  assert.equal(held.released, 1)
+})
+
+test('a new pause bumps only the sessions it captured, never another plan own continuation', async () => {
+  const plan = {
+    version: 3, planId: 'pause-old', status: 'paused', source: 'pause',
+    sessions: [{ sessionId: 's1', intent: 'continue', epoch: 1, running: true, lastTurn: 2 }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe({ readable: true, sessions: [{ sessionId: 's3', running: true, lastTurn: 0 }], goals: [], jobs: [] }, { canceled: ['s3'] })
+  const { engine } = engineFor({ store, probe })
+  assert.equal((await engine.pause()).status, 'paused')
+  const rows = new Map(store.state.plan.sessions.map((row) => [row.sessionId, row]))
+  assert.equal(rows.get('s1').epoch, 1)
+  assert.equal(rows.get('s3').epoch, 1)
+})
+
+test('a pending duplicate left by a failed migration cleanup is cleared before the plan is consumed', async () => {
+  const plan = {
+    version: 3, planId: 'pause-migrated', status: 'paused', source: 'pause',
+    sessions: [{ sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  store.state.pending = plan
+  const held = { hold() {}, release() { held.released = true } }
+  const { engine } = engineFor({ store, heartbeat: held })
+  await engine.hydrate()
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.equal(store.state.pending, null)
+  assert.equal(store.state.consumed.plan.planId, 'pause-migrated')
 })

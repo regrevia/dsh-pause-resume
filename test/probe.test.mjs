@@ -384,3 +384,55 @@ test('restoreSchedule() is honest about having nothing to restore', async () => 
   const probe = createProbe(registry({}))
   assert.deepEqual(await probe.restoreSchedule(), { status: 'skipped', detail: 'no schedules' })
 })
+
+test('restoreGoal() re-arms an active goal that its restore intent owns after a restart', async () => {
+  const agent = { id: 's1', status: 'idle', phase: { lastTurn: 0 } }
+  const fake = harness({
+    agents: [agent],
+    goals: { s1: { id: 'g1', revision: 5, phase: 'active', activation: 'disarmed' } },
+  })
+  const probe = createProbe(fake.registry)
+  const outcome = await probe.restoreGoal(
+    { sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: null, pendingRestore: { revision: 4, at: 1 } },
+    { plan: { planId: 'pause-1' } },
+  )
+  assert.equal(outcome.status, 'restored')
+  assert.equal(outcome.revision, 6)
+  assert.deepEqual(fake.calls.filter((call) => call[0] === 'goals.resume'), [['goals.resume', 's1', 'g1', 5]])
+})
+
+test('restoreGoal() retries a goal whose state cannot be read instead of recording a skip', async () => {
+  const agent = { id: 's1', status: 'idle', phase: { lastTurn: 0 } }
+  const fake = harness({ agents: [agent], goals: { s1: { id: 'g1', revision: 4, phase: 'paused', activation: 'disarmed' } } })
+  const original = fake.services.goals.get
+  let reads = 0
+  fake.services.goals.get = (target) => {
+    reads += 1
+    if (reads === 1) throw new Error('GOAL_READ_FAILED')
+    return original(target)
+  }
+  const probe = createProbe(fake.registry)
+  const outcome = await probe.restoreGoal({ sessionId: 's1', goalId: 'g1', revision: 4 }, { plan: { planId: 'pause-1' } })
+  assert.equal(outcome.status, 'failed')
+  assert.match(outcome.detail, /unreadable/u)
+  assert.equal(fake.calls.some((call) => call[0] === 'goals.resume'), false)
+})
+
+test('a reload during a cold mount stops the old probe before it reports or prompts', async () => {
+  const fake = harness({ agents: [] })
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const original = fake.services.sessionController.resolveAgent
+  fake.services.sessionController.resolveAgent = async (sessionId) => {
+    await gate
+    return original(sessionId)
+  }
+  let current = true
+  const probe = createProbe(fake.registry, { isCurrent: () => current })
+  const pending = probe.restoreSession({ sessionId: 's9', intent: 'continue', epoch: 0, running: true, lastTurn: 0 }, { plan: { planId: 'pause-1' } })
+  current = false
+  release()
+  const outcome = await pending
+  assert.deepEqual(outcome, { status: 'reloaded' })
+  assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
+})

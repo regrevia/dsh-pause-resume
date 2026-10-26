@@ -2,12 +2,12 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createStore } from './lib/snapshot.js'
 import { createEngine } from './lib/engine.js'
-import { nextEpoch, dropEpoch } from './lib/epoch.js'
+import { nextEpoch, currentEpoch, dropEpoch } from './lib/epoch.js'
 import { createHeartbeat } from './lib/heartbeat.js'
 import { createProbe, listRunning } from './lib/probe.js'
 
 export const name = 'dsh-pause-resume'
-export const VERSION = '0.4.4'
+export const VERSION = '0.4.5'
 
 const BASE_PATH = '/dsh-pause-resume'
 const BUTTON_HEADER = 'x-dsh-pause-resume'
@@ -216,6 +216,7 @@ export function apply(ctx, config = {}) {
     log,
   })
   const probe = createProbe(ctx, {
+    isCurrent: () => currentEpoch() === epoch,
     graceMs: Number.isFinite(config?.graceMs) ? config.graceMs : 2000,
     continueText: typeof config?.continueText === 'string' ? config.continueText : undefined,
   })
