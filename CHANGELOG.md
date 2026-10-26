@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.6
+
+* Restore attention rows are deduplicated by their own text, so two different items no longer
+  collapse into one.
+* Restore records from before 0.4.3 no longer keep a clean idle page dotted for killed jobs, which
+  can never restart. Modern records already list them in `jobsStopped`.
+* A pending copy left by a failed migration cleanup is removed before the completed plan is
+  consumed, so the next boot does not offer the same restore again.
+
 ## 0.4.5
 
 A restore now leaves a durable record before every side effect, so a restart can finish it.

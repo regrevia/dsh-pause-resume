@@ -889,3 +889,21 @@ test('a pending duplicate left by a failed migration cleanup is cleared before t
   assert.equal(store.state.pending, null)
   assert.equal(store.state.consumed.plan.planId, 'pause-migrated')
 })
+
+test('distinct restore attention strings are counted separately and old job noise is ignored', async () => {
+  const store = fakeStore()
+  store.state.result = {
+    summary: {
+      attention: [
+        'job bash-1: stopped, not restarted',
+        'session s1: continuation admitted, no turn started',
+        'session s2: turn cannot be proven finished',
+      ],
+    },
+  }
+  const { engine } = engineFor({ store })
+  await engine.hydrate()
+  const state = engine.describe()
+  assert.equal(state.attention, 2)
+  assert.equal(state.focus, 's1')
+})
