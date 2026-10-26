@@ -1,13 +1,29 @@
 window.__ModuleLoader__.load({
-  id: 'dsh-pause-resume',
+  id: 'dsh-pause-resume', // ui-copy-ignore
   factory(require) {
     const React = require('react')
     const h = React.createElement
 
     const zh = /^zh/i.test(navigator.language || '')
     const COPY = zh
-      ? { pause: '暂停', resume: '继续', busy: '正在处理' }
-      : { pause: 'Pause', resume: 'Resume', busy: 'Working' }
+      ? {
+          pause: '暂停', // ui-copy-ignore
+          resume: '继续', // ui-copy-ignore
+          busy: '正在处理', // ui-copy-ignore
+          error: '上次操作没有完成', // ui-copy-ignore
+          partial: '部分内容未能恢复，可以再按一次', // ui-copy-ignore
+          stopped: '上次暂停的内容还没有恢复', // ui-copy-ignore
+          attention: '有内容需要你处理',
+        }
+      : {
+          pause: 'Pause', // ui-copy-ignore
+          resume: 'Resume', // ui-copy-ignore
+          busy: 'Working', // ui-copy-ignore
+          error: 'The last action did not finish',
+          partial: 'Some items were not restored; press again to retry',
+          stopped: 'Work is still stopped',
+          attention: 'Some items need a look',
+        }
 
     const HOST_BASE = '/dsh-pause-resume' // ui-copy-ignore
     const POLL_MS = 2000 // ui-copy-ignore
@@ -18,7 +34,17 @@ window.__ModuleLoader__.load({
      * Host owns the phase and this asks for it. Until an answer arrives the button renders the // ui-copy-ignore
      * settled state (`none`), never a spinner, so a slow Host cannot look like a running press. // ui-copy-ignore
      */
-    const EMPTY = { phase: 'idle', action: 'none', source: null, complete: null, counts: { sessions: 0, goals: 0, schedules: 0, jobs: 0 }, live: { sessions: 0, goals: 0, jobs: 0 }, error: null }
+    const EMPTY = {
+      phase: 'idle', // ui-copy-ignore
+      action: 'none', // ui-copy-ignore
+      source: null, // ui-copy-ignore
+      complete: null, // ui-copy-ignore
+      outstanding: 0,
+      counts: { sessions: 0, goals: 0, jobs: 0 },
+      live: { sessions: 0, goals: 0, jobs: 0 },
+      attention: 0,
+      error: null, // ui-copy-ignore
+    }
 
     function withTimeout(promise, ms = REQUEST_MS) {
       let id = null
@@ -28,9 +54,9 @@ window.__ModuleLoader__.load({
       return Promise.race([promise, timer]).finally(() => clearTimeout(id))
     }
 
-    async function readState() {
+    async function readState(signal) {
       try {
-        const response = await withTimeout(fetch(`${HOST_BASE}/state`, { cache: 'no-store', credentials: 'same-origin' }))
+        const response = await withTimeout(fetch(`${HOST_BASE}/state`, { cache: 'no-store', credentials: 'same-origin', signal })) // ui-copy-ignore
         if (!response.ok) return null
         const data = await withTimeout(response.json())
         return data !== null && typeof data === 'object' ? data : null
@@ -39,13 +65,14 @@ window.__ModuleLoader__.load({
       }
     }
 
-    async function press(action) {
+    async function press(action, signal) {
       try {
         const response = await withTimeout(fetch(`${HOST_BASE}/${action}`, {
           method: 'POST', // ui-copy-ignore
           credentials: 'same-origin',
           headers: { 'content-type': 'application/json', 'x-dsh-pause-resume': '1' }, // ui-copy-ignore
           body: '{}', // ui-copy-ignore
+          signal,
         }))
         if (!response.ok) return null
         const data = await withTimeout(response.json())
@@ -110,49 +137,93 @@ window.__ModuleLoader__.load({
     }, h('path', { d: 'M5.2 3.4a.7.7 0 0 0-1.05.6v8a.7.7 0 0 0 1.05.6l6.9-4a.7.7 0 0 0 0-1.2l-6.9-4z' }))
     const SPIN_GLYPH = icon(['M8 2.5a5.5 5.5 0 1 1-4.3 2.06'], SPIN_STYLE)
 
+    /** The one sentence behind the dot, in the tooltip only: the button itself stays a glyph. */
+    function hintOf(state) {
+      if (state.error === 'restore-partial') return COPY.partial
+      if (state.error !== null && state.error !== undefined) return COPY.error
+      if ((state.attention ?? 0) > 0) return COPY.attention
+      if ((state.outstanding ?? 0) > 0) return COPY.stopped
+      return ''
+    }
+
     function Button() {
       const [state, setState] = React.useState(EMPTY)
       const [hover, setHover] = React.useState(false)
+      const [pressing, setPressing] = React.useState(false)
       const mounted = React.useRef(true)
+      /** Each answer carries a number: a slow reply may never overwrite a newer one. */
+      const seq = React.useRef(0)
+      const inflight = React.useRef(null)
+
+      const apply = React.useCallback((next) => {
+        if (!mounted.current || next === null) return
+        seq.current += 1
+        setState({ ...EMPTY, ...next })
+      }, [])
+
+      const pull = React.useCallback(async (signal) => {
+        const mine = seq.current
+        const next = await readState(signal)
+        if (!mounted.current || seq.current !== mine) return
+        if (next !== null) apply(next)
+      }, [apply])
 
       React.useEffect(() => {
         ensureStyle()
         mounted.current = true
         let timer = null
-        const pull = async () => {
-          const next = await readState()
-          if (!mounted.current) return
-          if (next !== null) setState({ ...EMPTY, ...next })
+        let current = null
+        const beat = () => {
+          if (document.visibilityState !== 'visible' || inflight.current !== null) return
+          try {
+            current?.abort()
+          } catch {}
+          current = typeof AbortController === 'function' ? new AbortController() : null
+          void pull(current?.signal)
         }
-        pull()
-        timer = setInterval(() => {
-          if (document.visibilityState === 'visible') pull()
-        }, POLL_MS)
+        beat()
+        timer = setInterval(beat, POLL_MS)
         const onVisible = () => {
-          if (document.visibilityState === 'visible') pull()
+          if (document.visibilityState === 'visible') beat()
         }
         document.addEventListener('visibilitychange', onVisible)
         return () => {
           mounted.current = false
           if (timer !== null) clearInterval(timer)
+          try {
+            current?.abort()
+          } catch {}
           document.removeEventListener('visibilitychange', onVisible)
         }
-      }, [])
+      }, [pull])
 
-      const busy = state.action === 'busy'
+      const busy = pressing || state.action === 'busy'
       const action = state.action === 'pause' || state.action === 'resume' ? state.action : null
       const disabled = action === null && !busy
 
       const onClick = async () => {
-        if (busy || action === null) return
-        // The phase is set from the Host's answer, never optimistically: the spinner appears when // ui-copy-ignore
-        // the Host says it started, so two windows can never show different phases. // ui-copy-ignore
-        setState((current) => ({ ...current, action: 'busy' }))
-        const answer = await press(action)
-        const next = await readState()
-        if (!mounted.current) return
-        if (next !== null) setState({ ...EMPTY, ...next })
-        else if (answer === null) setState((current) => ({ ...current, action }))
+        if (busy || action === null || inflight.current !== null) return
+        // One press at a time, in this tab and across tabs: the Host also refuses an overlapping // ui-copy-ignore
+        // press, so a second window's button settles on the same answer instead of starting work.
+        const controller = typeof AbortController === 'function' ? new AbortController() : null
+        inflight.current = controller
+        setPressing(true)
+        try {
+          const answer = await press(action, controller?.signal)
+          const next = answer ?? (await readState())
+          if (mounted.current) {
+            if (next !== null) {
+              seq.current += 1
+              setState({ ...EMPTY, ...next })
+            } else {
+              // The press may still have landed: ask again rather than guessing the phase.
+              void pull(controller?.signal)
+            }
+          }
+        } finally {
+          inflight.current = null
+          if (mounted.current) setPressing(false)
+        }
       }
 
       const style = busy || disabled
@@ -163,6 +234,7 @@ window.__ModuleLoader__.load({
 
       const glyph = busy ? SPIN_GLYPH : action === 'resume' ? PLAY_GLYPH : PAUSE_GLYPH
       const label = busy ? COPY.busy : action === 'resume' ? COPY.resume : COPY.pause
+      const hint = hintOf(state)
 
       return h('button', {
         type: 'button', // ui-copy-ignore
@@ -171,9 +243,10 @@ window.__ModuleLoader__.load({
         disabled,
         'aria-label': label,
         'aria-busy': busy,
+        title: hint === '' ? label : `${label} · ${hint}`,
         onMouseEnter: () => setHover(true),
         onMouseLeave: () => setHover(false),
-      }, glyph, state.error === null || state.error === undefined ? null : h('span', { style: DOT_STYLE, 'aria-hidden': true }))
+      }, glyph, hint === '' ? null : h('span', { style: DOT_STYLE, 'aria-hidden': true }))
     }
 
     return {

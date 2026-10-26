@@ -6,11 +6,12 @@ import { createHeartbeat } from './lib/heartbeat.js'
 import { createProbe, listRunning } from './lib/probe.js'
 
 export const name = 'dsh-pause-resume'
-export const VERSION = '0.1.0'
+export const VERSION = '0.2.0'
 
 const BASE_PATH = '/dsh-pause-resume'
 const BUTTON_HEADER = 'x-dsh-pause-resume'
 const BOOT_KEY = Symbol.for('dsh-pause-resume.boot')
+const LIVENESS_MS = 400
 
 /** A page this machine may have opened. A public name that resolves here is the rebinding case. */
 const LOCAL_ADDRESS =
@@ -38,7 +39,6 @@ function bootId() {
   return created
 }
 
-
 function service(ctx, key) {
   try {
     return ctx.get(key)
@@ -49,8 +49,8 @@ function service(ctx, key) {
 
 function sendJson(res, status, value) {
   try {
-    const body = JSON.stringify(value ?? { status: 'error' })
     if (res?.headersSent === true) return res.end()
+    const body = JSON.stringify(value ?? { status: 'error' })
     res.writeHead(status, {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-store',
@@ -66,13 +66,18 @@ function sendJson(res, status, value) {
   }
 }
 
-/** Whether one request may act for the button: a header a cross-site form cannot set, same origin. */
-function buttonAllowed(req) {
+/**
+ * Whether one request may act for the button: a header a cross-site form cannot set, and the same
+ * origin that served this page. `allowRemote` widens the address check, never the header or origin
+ * check, so a hostile page cannot press the button even on a trusted network.
+ */
+function buttonAllowed(req, allowRemote) {
   try {
     const header = req?.headers?.[BUTTON_HEADER]
     if (typeof header !== 'string' || header === '') return false
     const site = typeof req?.headers?.host === 'string' ? req.headers.host.trim().toLowerCase() : '' // ui-copy-ignore
-    if (site !== '' && LOCAL_ADDRESS.test(site) === false) return false
+    if (site === '') return false
+    if (allowRemote !== true && LOCAL_ADDRESS.test(site) === false) return false
     const origin = typeof req?.headers?.origin === 'string' ? req.headers.origin.trim().toLowerCase() : ''
     if (origin === 'null') return false
     if (origin !== '') {
@@ -112,50 +117,53 @@ function guard(handler) {
   }
 }
 
-function serve(ctx, engine, heartbeat) {
+function serve(ctx, engine, heartbeat, options) {
   const server = service(ctx, 'webServer')
   if (server === undefined || server === null || typeof server.register !== 'function') {
     log('no web server: the header button cannot ask for a pause')
     return () => {}
   }
+  const allowRemote = options.allowRemote === true
+  const route = (handler, read) => guard(async (req, res) => {
+    const method = String(req?.method ?? 'GET').toUpperCase()
+    if (read === true ? method !== 'GET' && method !== 'HEAD' : method !== 'POST') {
+      return sendJson(res, 405, { status: 'method' })
+    }
+    // A read still refuses another origin, but it does not need the button header.
+    if (read === true ? sameOrigin(req, allowRemote) === false : buttonAllowed(req, allowRemote) === false) {
+      return sendJson(res, 403, { status: 'forbidden' })
+    }
+    return handler(req, res)
+  })
   const handlers = [
     [
       `${BASE_PATH}/state`,
-      async (req, res) => {
-        const method = String(req?.method ?? 'GET').toUpperCase()
-        if (method !== 'GET' && method !== 'HEAD') return sendJson(res, 405, { status: 'method' })
-        sendJson(res, 200, await engine.describe())
-      },
+      route(async (req, res) => {
+        sendJson(res, 200, engine.describe())
+      }, true),
     ],
     [
       `${BASE_PATH}/pause`,
-      async (req, res) => {
-        const method = String(req?.method ?? 'GET').toUpperCase()
-        if (method !== 'POST') return sendJson(res, 405, { status: 'method' })
-        if (buttonAllowed(req) === false) return sendJson(res, 403, { status: 'forbidden' })
+      route(async (req, res) => {
         const outcome = await engine.pause()
         log(`pause: ${outcome.status}${outcome.status === 'busy' ? ` (${outcome.phase})` : ''}`)
         if (outcome.status === 'paused') heartbeat.release()
-        sendJson(res, 200, { ...(await engine.describe()), outcome })
-      },
+        sendJson(res, 200, { ...engine.describe(), outcome })
+      }, false),
     ],
     [
       `${BASE_PATH}/resume`,
-      async (req, res) => {
-        const method = String(req?.method ?? 'GET').toUpperCase()
-        if (method !== 'POST') return sendJson(res, 405, { status: 'method' })
-        if (buttonAllowed(req) === false) return sendJson(res, 403, { status: 'forbidden' })
+      route(async (req, res) => {
         const outcome = await engine.resume()
         log(`resume: ${outcome.status}`)
-        if (outcome.status === 'resumed') heartbeat.release()
-        sendJson(res, 200, { ...(await engine.describe()), outcome })
-      },
+        sendJson(res, 200, { ...engine.describe(), outcome })
+      }, false),
     ],
   ]
   const disposers = []
   for (const [path, handler] of handlers) {
     try {
-      const dispose = server.register({ kind: 'exact', path, handler: guard(handler) })
+      const dispose = server.register({ kind: 'exact', path, handler })
       if (typeof dispose === 'function') disposers.push(dispose)
     } catch (error) {
       log(`cannot answer ${path}: ${error?.message ?? error}`)
@@ -170,39 +178,102 @@ function serve(ctx, engine, heartbeat) {
   }
 }
 
+/** Same-origin read: a page on another host may not learn what is running here. */ // ui-copy-ignore
+function sameOrigin(req, allowRemote) {
+  try {
+    const site = typeof req?.headers?.host === 'string' ? req.headers.host.trim().toLowerCase() : '' // ui-copy-ignore
+    if (site === '') return false
+    if (allowRemote !== true && LOCAL_ADDRESS.test(site) === false) return false
+    const origin = typeof req?.headers?.origin === 'string' ? req.headers.origin.trim().toLowerCase() : ''
+    if (origin === 'null') return false
+    if (origin === '') return true
+    try {
+      return new URL(origin).host.toLowerCase() === site // ui-copy-ignore
+    } catch {
+      return false
+    }
+  } catch {
+    return false
+  }
+}
+
 export function apply(ctx, config = {}) {
   const dir = dataDir()
-  const store = createStore(dir)
+  const allowRemote = config?.allowRemote === true
+  const store = createStore(dir, { log })
   const heartbeat = createHeartbeat({
     dir,
     bootId: bootId(),
+    intervalMs: Number.isFinite(config?.intervalMs) ? config.intervalMs : 5000,
     listRunning: () => listRunning(ctx),
     log,
   })
+  const probe = createProbe(ctx, {
+    graceMs: Number.isFinite(config?.graceMs) ? config.graceMs : 2000,
+    continueText: typeof config?.continueText === 'string' ? config.continueText : undefined,
+  })
   const engine = createEngine({
     store,
-    probe: createProbe(ctx, heartbeat),
+    probe,
+    heartbeat,
     graceMs: Number.isFinite(config?.graceMs) ? config.graceMs : 2000,
-    gapMs: Number.isFinite(config?.gapMs) ? config.gapMs : 150,
     log,
   })
 
+  let disposed = false
   let disposeRoutes = () => {}
   const cleanup = () => {
+    disposed = true
     try {
       disposeRoutes()
     } catch {}
+    // A reload is not a crash: keep the heartbeat's last write as evidence, but let go of timers.
     heartbeat.stop()
   }
 
   if (typeof ctx.effect === 'function') ctx.effect(() => cleanup)
   else if (typeof ctx.on === 'function') ctx.on('dispose', cleanup)
 
+  // Turn edges are what a crash loses first, so the heartbeat follows them instead of waiting for its
+  // own interval. The interval stays as the fallback for a registry that changes shape silently.
+  let liveness = null
+  const noteRunning = () => {
+    if (disposed) return
+    try {
+      heartbeat.note(listRunning(ctx))
+    } catch (error) {
+      log(`cannot note running work: ${error?.message ?? error}`)
+    }
+  }
+  const watchStatus = () => {
+    if (liveness !== null) clearTimeout(liveness)
+    liveness = setTimeout(() => {
+      liveness = null
+      noteRunning()
+    }, LIVENESS_MS)
+    if (typeof liveness?.unref === 'function') liveness.unref()
+  }
+  try {
+    if (typeof ctx.on === 'function') {
+      ctx.on('agent/status', watchStatus)
+      ctx.on('agent/dispose', watchStatus)
+      ctx.on('agent/register', watchStatus)
+    }
+  } catch (error) {
+    log(`cannot follow agent events: ${error?.message ?? error}`)
+  }
+
   void (async () => {
     try {
-      await engine.hydrate()
+      // The heartbeat claims the previous process's record in `start`, and the engine's crash plan
+      // is derived from that claim: start first, or the residue is read as absent and lost.
       heartbeat.start()
-      disposeRoutes = serve(ctx, engine, heartbeat)
+      if (disposed) return
+      await engine.hydrate()
+      if (disposed) return
+      const dispose = serve(ctx, engine, heartbeat, { allowRemote })
+      if (disposed) dispose()
+      else disposeRoutes = dispose
       log(`ready (${engine.phase})`)
     } catch (error) {
       log(`cannot start: ${error?.message ?? error}`)

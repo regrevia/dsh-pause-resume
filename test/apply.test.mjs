@@ -1,17 +1,22 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { apply } from '../index.js'
 
 /** Mount the plugin the way the Host does: one registry, one effect collector, one route table. */
-async function mount(services = {}) {
+async function mount(services = {}, home = mkdtempSync(join(tmpdir(), 'dsh-pause-test-'))) {
   const routes = []
   const cleanups = []
+  // Every mount owns a fresh state directory: a test may never read or write the real profile.
+  process.env.DSH_HOME = home
   const registry = {
     webServer: { register: (route) => routes.push(route) },
-    sessionController: { list: async () => ({ items: [] }), cancel: () => {} },
-    goals: { get: async () => undefined, pause: () => {}, resume: () => {} },
+    sessionController: { cancel: async () => {}, resolveAgent: async () => undefined },
+    goals: { get: () => undefined, pause: () => {}, resume: () => {} },
     jobs: { list: () => [], kill: () => {} },
-    agents: { get: () => undefined, resume: async () => {} },
+    agents: { get: () => undefined, list: () => [], resume: async () => {} },
     ...services,
   }
   apply({ get: (key) => registry[key], effect: (fn) => cleanups.push(fn), on: () => {} }, {})
@@ -23,7 +28,7 @@ async function mount(services = {}) {
     await route.handler({ method: 'GET', headers: { host: '127.0.0.1:54601' }, ...request }, answer)
     return { status: answer.status, value: answer.body === '' ? null : JSON.parse(answer.body) }
   }
-  return { routes, cleanups, call }
+  return { routes, cleanups, call, home }
 }
 
 test('the mount registers the three routes and answers state', async () => {
@@ -41,8 +46,12 @@ test('the mount registers the three routes and answers state', async () => {
 
 test('a live turn and an armed goal turn the glyph into pause', async () => {
   const { call } = await mount({
-    sessionController: { list: async () => ({ items: [{ sessionId: 's1', running: true, agentAvailable: true }] }), cancel: () => {} },
-    goals: { get: async () => ({ id: 'g1', revision: 1, phase: 'active', activation: 'armed' }), pause: () => {}, resume: () => {} },
+    agents: {
+      get: (id) => (id === 's1' ? { id: 's1', status: 'running', phase: { lastTurn: 1 } } : undefined),
+      list: () => [{ id: 's1', status: 'running', phase: { lastTurn: 1 } }],
+      resume: async () => {},
+    },
+    goals: { get: () => ({ id: 'g1', revision: 1, phase: 'active', activation: 'armed' }), pause: () => {}, resume: () => {} },
   })
   const { value } = await call('/dsh-pause-resume/state')
   assert.equal(value.phase, 'idle')
@@ -57,4 +66,23 @@ test('the header is required and the verb is checked', async () => {
   assert.equal((await call('/dsh-pause-resume/pause', { method: 'POST' })).status, 403)
   const allowed = await call('/dsh-pause-resume/pause', { method: 'POST', headers: { host: '127.0.0.1:54601', 'x-dsh-pause-resume': '1' } })
   assert.ok([200, 500].includes(allowed.status))
+})
+
+test('a previous process running.json is offered as resume before any press', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-pause-test-'))
+  const dir = join(home, 'pause-resume')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'running.json'), JSON.stringify({
+    version: 2,
+    bootId: '111-foreign',
+    updatedAt: 1000,
+    sessions: [{ sessionId: 's9' }],
+  }))
+  const { call } = await mount({}, home)
+  const { value } = await call('/dsh-pause-resume/state')
+  assert.equal(value.source, 'crash')
+  assert.equal(value.action, 'resume')
+  assert.equal(value.counts.sessions, 1)
+  assert.equal(value.error, null)
+  rmSync(home, { recursive: true, force: true })
 })

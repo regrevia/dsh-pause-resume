@@ -6,213 +6,297 @@ function registry(services) {
   return { get: (key) => services[key] }
 }
 
-function row(sessionId, over = {}) {
-  return { sessionId, running: false, agentAvailable: true, blank: false, ...over }
-}
-
-function goal(id, over = {}) {
-  return { id, revision: 1, phase: 'active', activation: 'armed', objective: 'work', ...over }
-}
-
-/** A judge that answers with the session listing and records every mutating call it receives. */
-function fake(services = {}) {
+/**
+ * A Harness shaped like the shipped one: `agents.get` and `agents.list` hand out the agent object
+ * itself, the goal service refuses anything that is not that object, and every transition bumps the
+ * revision. The fake keeps those three properties because they are the ones the probe depends on.
+ */
+function harness({ agents = [], goals = {}, jobs = {}, unownedJobs = [], keepRunning = false } = {}) {
   const calls = []
-  const base = {
-    sessionController: {
-      list: async () => ({ items: services.rows ?? [] }),
-      cancel: (request) => {
-        calls.push(['cancel', request.sessionId])
-        // A real cancel ends the turn; a stubborn turn is the case that keeps reporting running.
-        if (services.keepRunning !== true) {
-          const target = (services.rows ?? []).find((entry) => entry.sessionId === request.sessionId)
-          if (target !== undefined) target.running = false
-        }
+  const live = new Map(agents.map((agent) => [agent.id, agent]))
+  const views = new Map(Object.entries(goals))
+  const services = {
+    agents: {
+      get: (id) => live.get(id),
+      list: () => [...live.values()],
+      resume: async (request) => {
+        calls.push(['agents.resume', request.resumeSessionId])
       },
     },
     goals: {
-      get: async (agent) => {
-        calls.push(['goal.get', agent.id])
-        if (services.goalError === true) throw new Error('agent is not live')
-        const view = services.goals?.[agent.id]
-        return view?.phase === undefined ? view : { ...view }
+      get: (agent) => {
+        // The shipped service asserts `agents.get(agent.id) === agent`; a bare id must fail here.
+        if (live.get(agent?.id) !== agent) throw new Error('GOAL_AGENT_NOT_LIVE')
+        const view = views.get(agent.id)
+        return view === undefined ? undefined : { ...view }
       },
-      pause: (agent, ref) => calls.push(['goal.pause', agent.id, ref.id, ref.revision]),
-      resume: (agent, ref) => calls.push(['goal.resume', agent.id, ref.id, ref.revision]),
+      pause: (agent, ref) => {
+        if (live.get(agent?.id) !== agent) throw new Error('GOAL_AGENT_NOT_LIVE')
+        const view = views.get(agent.id)
+        if (view === undefined || view.id !== ref.id || view.revision !== ref.revision) throw new Error('GOAL_STALE_REVISION')
+        if (view.phase !== 'active') throw new Error('GOAL_INVALID_TRANSITION')
+        const next = { ...view, phase: 'paused', activation: 'disarmed', revision: view.revision + 1 }
+        views.set(agent.id, next)
+        calls.push(['goals.pause', agent.id, ref.id, ref.revision])
+        return { ...next }
+      },
+      resume: (agent, ref) => {
+        if (live.get(agent?.id) !== agent) throw new Error('GOAL_AGENT_NOT_LIVE')
+        const view = views.get(agent.id)
+        if (view === undefined || view.id !== ref.id || view.revision !== ref.revision) throw new Error('GOAL_STALE_REVISION')
+        if (view.phase === 'active' && view.activation === 'armed') throw new Error('GOAL_INVALID_TRANSITION')
+        const next = { ...view, phase: 'active', activation: 'armed', revision: view.revision + 1 }
+        views.set(agent.id, next)
+        calls.push(['goals.resume', agent.id, ref.id, ref.revision])
+        return { ...next }
+      },
     },
     jobs: {
       list: (caller) => {
-        calls.push(['job.list', caller ?? null])
-        return caller === undefined ? services.unowned ?? [] : services.jobs?.[caller] ?? []
+        calls.push(['jobs.list', caller ?? null])
+        return caller === undefined ? unownedJobs : jobs[caller] ?? []
       },
-      kill: (id, caller) => calls.push(['job.kill', id, caller]),
+      kill: (id, caller) => {
+        calls.push(['jobs.kill', id, caller ?? null])
+      },
     },
-    agents: {
-      ...(services.agentHandles === undefined
-        ? {}
-        : {
-            list: () => {
-              calls.push(['agent.list'])
-              if (services.agentListError === true) throw new Error('registry disposed')
-              return services.agentHandles.map((handle) => ({ agent: handle }))
-            },
-          }),
-      get: (sessionId) => (services.live?.includes(sessionId) === true ? { id: sessionId } : undefined),
-      resume: async (request) => {
-        calls.push(['agent.resume', request.resumeSessionId])
-        services.live?.push(request.resumeSessionId)
+    sessionController: {
+      cancel: async (request) => {
+        calls.push(['cancel', request.sessionId])
+        if (keepRunning !== true) {
+          const agent = live.get(request.sessionId)
+          if (agent !== undefined) {
+            agent.status = 'idle'
+            // A real abort ends the turn, which moves the counter past the plan's pre-press value.
+            agent.phase.lastTurn = (agent.phase.lastTurn ?? 0) + 1
+          }
+        }
+      },
+      resolveAgent: async (sessionId) => {
+        calls.push(['resolveAgent', sessionId])
+        const existing = live.get(sessionId)
+        if (existing !== undefined) return existing
+        const agent = { id: sessionId, status: 'idle', phase: { lastTurn: 0 }, mounted: true }
+        live.set(sessionId, agent)
+        return agent
+      },
+      prompt: async (request, source, signal) => {
+        calls.push(['prompt', request.sessionId, request.requestId, request.mode, request.content[0].text, source.rpcId, signal instanceof AbortSignal])
+        const agent = live.get(request.sessionId)
+        if (agent === undefined) throw new Error('SESSION_NOT_FOUND')
+        agent.status = 'running'
+        agent.phase.lastTurn = (agent.phase.lastTurn ?? 0) + 1
+        return { accepted: true }
       },
     },
   }
-  const merged = { ...base, ...services.override }
-  return { probe: createProbe(registry(merged), services.heartbeat ?? { residue: null }), calls }
+  return { services, registry: registry(services), calls, live, views }
 }
 
-test('the listing is read through its items field', async () => {
-  const { probe } = fake({ rows: [row('s1', { running: true }), row('s2'), { sessionId: 7 }] })
-  const live = await probe.live()
-  assert.deepEqual(live.sessions, [{ sessionId: 's1', running: true }])
+async function settle(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+test('live() reads the live registry, active goals and running jobs', () => {
+  const a = { id: 's1', status: 'running', phase: { lastTurn: 3 } }
+  const b = { id: 's2', status: 'idle', phase: { lastTurn: 1 } }
+  const fake = harness({
+    agents: [a, b],
+    goals: {
+      s1: { id: 'g1', revision: 4, phase: 'active', activation: 'armed' },
+      s2: { id: 'g2', revision: 2, phase: 'paused', activation: 'disarmed' },
+    },
+    jobs: { s1: [{ id: 'j1', status: 'running' }, { id: 'j2', status: 'done' }] },
+    unownedJobs: [{ id: 'j3', status: 'stopping' }],
+  })
+  const probe = createProbe(fake.registry)
+  const live = probe.live()
+  assert.equal(live.readable, true)
+  assert.deepEqual(live.sessions, [
+    { sessionId: 's1', running: true, lastTurn: 3 },
+    { sessionId: 's2', running: false, lastTurn: 1 },
+  ])
+  // A paused goal is the person's pause, not this press's work.
+  assert.deepEqual(live.goals, [{ sessionId: 's1', goalId: 'g1', revision: 4 }])
+  assert.deepEqual(live.jobs.map((job) => job.id), ['j3', 'j1'])
 })
 
-test('an open tab without a running turn is not work', async () => {
-  const { probe } = fake({ rows: [row('s1')] })
-  const live = await probe.live()
+test('live() reads the agent inside a listed row, not the row own status', () => {
+  const agent = { id: 's1', status: 'idle', phase: { lastTurn: 7 } }
+  const probe = createProbe(registry({
+    agents: {
+      list: () => [{ id: 's1', status: 'running', agent }],
+      get: () => agent,
+    },
+  }))
+  assert.equal(listRunning(registry({ agents: { list: () => [{ id: 's1', status: 'running', agent }] } })).length, 0)
+  assert.deepEqual(probe.live().sessions, [{ sessionId: 's1', running: false, lastTurn: 7 }])
+})
+
+test('live() reports an unreadable registry instead of claiming there is nothing to stop', () => {
+  const probe = createProbe(registry({ agents: { list: () => { throw new Error('disposed') } } }))
+  const live = probe.live()
+  assert.equal(live.readable, false)
   assert.deepEqual(live.sessions, [])
   assert.deepEqual(live.goals, [])
 })
 
-test('a goal is read by session id and counts as work while it is active', async () => {
-  const { probe, calls } = fake({ rows: [row('s1')], goals: { s1: goal('g1') } })
-  const live = await probe.live()
-  assert.deepEqual(live.sessions, [{ sessionId: 's1', running: false }])
-  assert.deepEqual(live.goals, [{ sessionId: 's1', goalId: 'g1', revision: 1 }])
-  assert.deepEqual(calls.find((call) => call[0] === 'goal.get'), ['goal.get', 's1'])
-})
-
-test('a paused goal leaves its session alone and a dead agent is not an error', async () => {
-  const paused = fake({ rows: [row('s1')], goals: { s1: goal('g1', { phase: 'paused' }) } })
-  assert.deepEqual((await paused.probe.live()).goals, [])
-  assert.deepEqual((await paused.probe.live()).sessions, [])
-
-  const dead = fake({ rows: [row('s1')], goalError: true })
-  assert.deepEqual((await dead.probe.live()).goals, [])
-})
-
-test('owned jobs are asked for per session and deduped across buckets', async () => {
-  const shared = { id: 'job-1', status: 'running', owner: 's1', label: 'build' }
-  const { probe, calls } = fake({
-    rows: [row('s1', { running: true })],
-    unowned: [{ id: 'job-0', status: 'running' }],
-    jobs: { s1: [shared, { id: 'job-2', status: 'completed', owner: 's1' }] },
+test('stop() pauses goals with the real agent object and returns the bumped revision', async () => {
+  const a = { id: 's1', status: 'running', phase: { lastTurn: 2 } }
+  const fake = harness({
+    agents: [a],
+    goals: { s1: { id: 'g1', revision: 7, phase: 'active', activation: 'armed' } },
+    jobs: { s1: [{ id: 'j1', status: 'running' }] },
   })
-  const live = await probe.live()
-  assert.deepEqual(live.jobs, [
-    { id: 'job-0', label: '', owner: undefined },
-    { id: 'job-1', label: 'build', owner: 's1' },
-  ])
-  assert.ok(calls.some((call) => call[0] === 'job.list' && call[1] === 's1'))
+  const probe = createProbe(fake.registry, { graceMs: 200 })
+  const live = probe.live()
+  const stopped = await probe.stop(live)
+  assert.deepEqual(fake.calls.filter((call) => call[0] === 'goals.pause'), [['goals.pause', 's1', 'g1', 7]])
+  assert.deepEqual(stopped.pausedGoals, [{ sessionId: 's1', goalId: 'g1', pausedRevision: 8 }])
+  assert.deepEqual(stopped.canceled, ['s1'])
+  assert.deepEqual(stopped.killedJobs, [{ id: 'j1', owner: 's1' }])
+  // Goal first, then the turn, then the job: a round must not be queued behind the press.
+  const order = fake.calls.map((call) => call[0]).filter((name) => ['goals.pause', 'cancel', 'jobs.kill'].includes(name))
+  assert.deepEqual(order, ['goals.pause', 'cancel', 'jobs.kill'])
+  assert.equal(a.status, 'idle')
+  assert.deepEqual(stopped.stillRunning, [])
+  assert.deepEqual(stopped.sessions, [{ sessionId: 's1', lastTurn: 3 }])
 })
 
-test('stop cancels running turns and pauses goals before it waits', async () => {
-  const rows = [row('s1', { running: true }), row('s2')]
-  const { probe, calls } = fake({ rows, goals: { s2: goal('g2', { revision: 4 }) } })
-  const current = {
-    sessions: [{ sessionId: 's1', running: true }, { sessionId: 's2', running: false }],
-    goals: [{ sessionId: 's2', goalId: 'g2', revision: 4 }],
-    jobs: [{ id: 'job-1', owner: 's1' }],
-    schedules: [],
-    terminals: [],
+test('stop() waits for a stubborn turn and reports it instead of claiming it stopped', async () => {
+  const a = { id: 's1', status: 'running', phase: { lastTurn: 1 } }
+  const fake = harness({ agents: [a], keepRunning: true })
+  const probe = createProbe(fake.registry, { graceMs: 150 })
+  const stopped = await probe.stop(probe.live())
+  assert.deepEqual(stopped.stillRunning, ['s1'])
+  assert.match(stopped.unknown[0], /still running/u)
+})
+
+test('stop() skips a goal whose agent disappeared and reports it', async () => {
+  const fake = harness({ agents: [] })
+  const probe = createProbe(fake.registry)
+  const stopped = await probe.stop({
+    sessions: [],
+    goals: [{ sessionId: 'gone', goalId: 'g1', revision: 1 }],
+    jobs: [],
+  })
+  assert.deepEqual(stopped.pausedGoals, [])
+  assert.equal(stopped.goalErrors.length, 0)
+})
+
+test('restoreSession() mounts an idle session and does not invent a turn', async () => {
+  const fake = harness({ agents: [] })
+  const probe = createProbe(fake.registry)
+  const outcome = await probe.restoreSession({ sessionId: 's9', running: false }, { plan: { planId: 'p1' } })
+  assert.deepEqual(outcome, { status: 'restored', detail: 'attached', continued: false })
+  assert.deepEqual(fake.calls.filter((call) => call[0] === 'resolveAgent'), [['resolveAgent', 's9']])
+  assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
+})
+
+test('restoreSession() continues a stopped turn with one visible, idempotent message', async () => {
+  const agent = { id: 's1', status: 'idle', phase: { lastTurn: 4 } }
+  const fake = harness({ agents: [agent] })
+  const probe = createProbe(fake.registry, { continueText: '接着来' })
+  const outcome = await probe.restoreSession({ sessionId: 's1', running: true, lastTurn: 4 }, { plan: { planId: 'pause-1' } })
+  assert.equal(outcome.continued, true)
+  const prompt = fake.calls.find((call) => call[0] === 'prompt')
+  assert.deepEqual(prompt, ['prompt', 's1', 'pause-1:continue:s1', 'followup', '接着来', 'pause-1:continue:s1', true])
+  assert.equal(agent.status, 'running')
+})
+
+test('restoreSession() skips a turn the person already continued', async () => {
+  const fake = harness({ agents: [{ id: 's1', status: 'idle', phase: { lastTurn: 9 } }] })
+  const probe = createProbe(fake.registry)
+  const outcome = await probe.restoreSession({ sessionId: 's1', running: true, lastTurn: 4 }, { plan: { planId: 'p1' } })
+  assert.equal(outcome.status, 'skipped')
+  assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
+})
+
+test('restoreSession() keeps a session that failed to mount retryable', async () => {
+  const failing = registry({
+    agents: { get: () => undefined, list: () => [] },
+    sessionController: { resolveAgent: async () => { throw new Error('REMOTE_CONFLICT') } },
+  })
+  const probe = createProbe(failing)
+  const outcome = await probe.restoreSession({ sessionId: 's1', running: false }, { plan: { planId: 'p1' } })
+  assert.equal(outcome.status, 'failed')
+  assert.match(outcome.detail, /REMOTE_CONFLICT/u)
+})
+
+test('restoreGoal() arms the paused goal with its exact revision and refuses a changed goal', async () => {
+  const agent = { id: 's1', status: 'idle', phase: { lastTurn: 2 } }
+  const fake = harness({
+    agents: [agent],
+    goals: { s1: { id: 'g1', revision: 8, phase: 'paused', activation: 'disarmed' } },
+  })
+  const probe = createProbe(fake.registry)
+  assert.deepEqual(await probe.restoreGoal({ sessionId: 's1', goalId: 'g1', pausedRevision: 8 }), { status: 'restored', detail: 'armed' })
+  assert.deepEqual(fake.calls.filter((call) => call[0] === 'goals.resume'), [['goals.resume', 's1', 'g1', 8]])
+
+  // The person edited the goal after the pause: its revision moved, so this press must not revive it.
+  const moved = harness({
+    agents: [{ id: 's2', status: 'idle', phase: {} }],
+    goals: { s2: { id: 'g2', revision: 12, phase: 'paused', activation: 'disarmed' } },
+  })
+  const second = createProbe(moved.registry)
+  assert.equal((await second.restoreGoal({ sessionId: 's2', goalId: 'g2', pausedRevision: 8 })).status, 'skipped')
+  assert.equal((await second.restoreGoal({ sessionId: 's2', goalId: 'g2', revision: 8 })).status, 'skipped')
+  assert.equal(moved.calls.some((call) => call[0] === 'goals.resume'), false)
+})
+
+test('restoreGoal() leaves an active goal alone and reports a finished one', async () => {
+  const fake = harness({
+    agents: [{ id: 's1', status: 'idle' }, { id: 's2', status: 'idle' }],
+    goals: {
+      s1: { id: 'g1', revision: 3, phase: 'active', activation: 'armed' },
+      s2: { id: 'g2', revision: 5, phase: 'complete', activation: 'disarmed' },
+    },
+  })
+  const probe = createProbe(fake.registry)
+  assert.equal((await probe.restoreGoal({ sessionId: 's1', goalId: 'g1', pausedRevision: 3 })).status, 'restored')
+  assert.equal((await probe.restoreGoal({ sessionId: 's2', goalId: 'g2', pausedRevision: 4 })).status, 'attention')
+  assert.equal(fake.calls.some((call) => call[0] === 'goals.resume'), false)
+})
+
+test('restoreGoal() mounts the session first, then re-arms its goal', async () => {
+  const fake = harness({
+    agents: [],
+    goals: { s1: { id: 'g1', revision: 2, phase: 'paused', activation: 'disarmed' } },
+  })
+  const mounted = { id: 's1', status: 'idle', phase: { lastTurn: 1 } }
+  fake.services.agents.get = () => undefined
+  const realResolve = fake.services.sessionController.resolveAgent
+  fake.services.sessionController.resolveAgent = async (sessionId) => {
+    await realResolve(sessionId)
+    fake.live.set(sessionId, mounted)
+    return mounted
   }
-  const outcome = await probe.stop(current, { graceMs: 1 })
-  assert.deepEqual(outcome, { canceled: ['s1'], unknown: [] })
-  assert.deepEqual(calls.filter((call) => call[0] === 'goal.pause'), [['goal.pause', 's2', 'g2', 4]])
-  assert.deepEqual(calls.filter((call) => call[0] === 'cancel'), [['cancel', 's1']])
-  assert.deepEqual(calls.filter((call) => call[0] === 'job.kill'), [['job.kill', 'job-1', 's1']])
+  const probe = createProbe(fake.registry)
+  assert.equal((await probe.restoreGoal({ sessionId: 's1', goalId: 'g1', pausedRevision: 2 })).status, 'restored')
+  assert.deepEqual(fake.calls.filter((call) => call[0] === 'resolveAgent'), [['resolveAgent', 's1']])
 })
 
-test('stop reports a turn that is still running when the grace runs out', async () => {
-  // cancel is a request: a turn that keeps reporting running is not claimed as stopped.
-  const rows = [row('s1', { running: true })]
-  const { probe } = fake({ rows, keepRunning: true })
-  const outcome = await probe.stop({ sessions: [{ sessionId: 's1', running: true }], goals: [], jobs: [] }, { graceMs: 120 })
-  assert.deepEqual(outcome.canceled, ['s1'])
-  assert.deepEqual(outcome.unknown, ['session s1: still running'])
-})
-
-test('restore skips a session that is still live instead of starting a second driver', async () => {
-  const { probe, calls } = fake({ live: ['s1'] })
-  assert.equal(await probe.restoreSession({ sessionId: 's1' }), 'skipped')
-  assert.deepEqual(calls.filter((call) => call[0] === 'agent.resume'), [])
-})
-
-test('restore resumes a closed session and rearms its disarmed goal', async () => {
-  const { probe, calls } = fake({ live: [], goals: { s1: goal('g1', { activation: 'idle' }) } })
-  assert.equal(await probe.restoreSession({ sessionId: 's1' }), 'restored')
-  assert.deepEqual(calls.filter((call) => call[0] === 'agent.resume'), [['agent.resume', 's1']])
-  assert.deepEqual(calls.filter((call) => call[0] === 'goal.resume'), [['goal.resume', 's1', 'g1', 1]])
-})
-
-test('a paused goal is resumed only at the revision the person left behind', async () => {
-  const same = fake({ goals: { s1: goal('g1', { phase: 'paused', revision: 3 }) } })
-  assert.equal(await same.probe.restoreGoal({ sessionId: 's1', goalId: 'g1', revision: 3 }), 'restored')
-
-  const moved = fake({ goals: { s1: goal('g1', { phase: 'paused', revision: 4 }) } })
-  assert.equal(await moved.probe.restoreGoal({ sessionId: 's1', goalId: 'g1', revision: 3 }), 'skipped')
-  assert.deepEqual(moved.calls.filter((call) => call[0] === 'goal.resume'), [])
-})
-
-test('crash residue becomes work only for sessions that still exist', async () => {
-  const heartbeat = { residue: { sessions: [{ sessionId: 's1' }, { sessionId: 'gone' }] } }
-  const { probe } = fake({ rows: [row('s1')], heartbeat })
-  const plan = await probe.crashPlan()
-  assert.deepEqual(plan.sessions, [{ sessionId: 's1', running: true }])
+test('crashPlan() mounts what a dead process was running but never continues it', () => {
+  const probe = createProbe(registry({}))
+  const plan = probe.crashPlan({ sessions: [{ sessionId: 's1' }, { sessionId: 's2' }], at: 1700000000000 }, { planId: 'crash-1' })
   assert.equal(plan.source, 'crash')
-
-  const empty = fake({ rows: [], heartbeat })
-  assert.equal(await empty.probe.crashPlan(), null)
+  assert.equal(plan.planId, 'crash-1')
+  assert.deepEqual(plan.sessions, [
+    { sessionId: 's1', running: false, lastTurn: null, crash: true },
+    { sessionId: 's2', running: false, lastTurn: null, crash: true },
+  ])
+  assert.deepEqual(plan.goals, [])
+  assert.equal(probe.crashPlan(null), null)
+  assert.equal(probe.crashPlan({ sessions: [] }), null)
 })
 
-test('live agents are read without walking every session on disk', async () => {
-  const { probe, calls } = fake({
-    agentHandles: [
-      { id: 'a1', status: 'running' },
-      { id: 'a2', status: 'idle' },
-    ],
-    goals: { a1: goal('g1') },
-  })
-  const live = await probe.live()
-  assert.deepEqual(live.sessions, [{ sessionId: 'a1', running: true }])
-  assert.deepEqual(live.goals, [{ sessionId: 'a1', goalId: 'g1', revision: 1 }])
-  assert.equal(calls.some(([name]) => name === 'goal.get' && true), true)
-  // a2 is attached but has neither a turn nor a goal: an open tab is not work.
-  assert.equal(calls.some(([name, id]) => name === 'goal.get' && id === 'a2'), true)
+test('listRunning() names exactly the sessions whose turn is open', () => {
+  const fake = harness({ agents: [{ id: 'a', status: 'running' }, { id: 'b', status: 'idle' }] })
+  assert.deepEqual(listRunning(fake.registry), ['a'])
+  assert.deepEqual(listRunning(registry({})), [])
 })
 
-test('an unreadable agent registry falls back to the listing instead of reporting no work', async () => {
-  const { probe, calls } = fake({
-    rows: [row('s1', { running: true })],
-    agentHandles: [{ id: 's1', status: 'running' }],
-    agentListError: true,
-  })
-  const live = await probe.live()
-  assert.deepEqual(live.sessions, [{ sessionId: 's1', running: true }])
-  assert.equal(calls.some(([name]) => name === 'agent.list'), true)
-  assert.equal(calls.some(([name]) => name === 'goal.get'), true)
-
-  const running = await listRunning(
-    registry({
-      agents: { list: () => { throw new Error('registry disposed') } },
-      sessionController: { list: async () => ({ items: [row('s9', { running: true })] }) },
-    }),
-  )
-  assert.deepEqual(running, ['s9'])
-})
-
-test('the heartbeat asks live agents first', async () => {
-  const running = await listRunning(
-    registry({
-      agents: { list: () => [{ id: 'a1', status: 'running' }, { id: 'a2', status: 'idle' }] },
-      sessionController: { list: async () => assert.fail('the listing is not needed when agents answer') },
-    }),
-  )
-  assert.deepEqual(running, ['a1'])
+test('restoreSchedule() is honest about having nothing to restore', async () => {
+  const probe = createProbe(registry({}))
+  assert.deepEqual(await probe.restoreSchedule(), { status: 'skipped', detail: 'no schedules' })
 })
