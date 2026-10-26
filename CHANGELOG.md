@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1
+
+A stop that could not finish no longer traps the button, and the dot stops lying after a resume.
+
+* An unfinished stop now always offers the resume that releases it. The button used to prefer
+  `pause` whenever live work remained, so a partial stop re-ran the same stop on the same
+  uncancellable turn: the icon never changed, the attention dot stayed, and pressing it did
+  nothing a person could see.
+* Work that starts while a plan waits no longer flips the button back to pause. The plan owns the
+  action until it is consumed.
 ## 0.4.0
 
 The crash path is now a first-class restore path, and a dead button after a restart is fixed.

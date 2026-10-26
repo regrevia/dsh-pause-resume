@@ -133,9 +133,9 @@ test('pause() writes the plan before stopping, then records only the goals that 
   assert.deepEqual(store.state.writes[1].goals, [{ sessionId: 's1', goalId: 'g1', revision: 5 }])
   assert.deepEqual(store.state.writes[1].sessions, [{ sessionId: 's1', running: true, intent: 'continue', epoch: 1, lastTurn: 4 }])
   assert.equal(store.state.plan.status, 'paused')
-  // The stub Harness still reports the turn as running; the button follows the registry, not the
-  // press, so a stop that did not stick keeps offering a pause.
-  assert.equal(engine.describe().action, 'pause')
+  // The stub Harness still reports the turn as running; the plan wins, so the button offers the
+  // resume that releases the stop instead of re-running it.
+  assert.equal(engine.describe().action, 'resume')
   live.sessions = []
   live.goals = []
   live.jobs = []
@@ -227,6 +227,29 @@ test('pause() keeps a turn that would not stop as reported attention, not as a c
   assert.equal(engine.describe().error, 'pause-partial')
   assert.deepEqual(store.state.plan.attention, [{ kind: 'session', id: 's1', detail: 'still running' }])
   assert.equal(engine.describe().attention, 1)
+  // The still-running turn cannot be cancelled directly; the plan is the only way out of here.
+  assert.equal(engine.describe().action, 'resume')
+})
+
+test('a partial stop offers resume, never another pause over its own residue', async () => {
+  const live = { readable: true, sessions: [{ sessionId: 's1', running: true }], goals: [], jobs: [] }
+  const probe = fakeProbe(live, { stillRunning: ['s1'] })
+  const { store, engine } = engineFor({ probe })
+  await engine.pause()
+  assert.equal(engine.describe().action, 'resume')
+  const first = await engine.resume()
+  assert.equal(first.status, 'resumed')
+  assert.equal(store.state.plan, null)
+  // Resuming skipped the live residue instead of stopping it again, and consumed the plan.
+  assert.equal(probe.calls.filter((call) => call[0] === 'stop').length, 1)
+  assert.equal(engine.describe().phase, 'idle')
+})
+
+test('work started while a plan is waiting does not turn the button back into pause', async () => {
+  const plan = { version: 3, planId: 'p1', source: 'pause', status: 'paused', sessions: [{ sessionId: 's1', running: true, lastTurn: 1 }], goals: [], jobs: [], attention: [] }
+  const probe = fakeProbe({ readable: true, sessions: [{ sessionId: 's2', running: true }], goals: [], jobs: [] })
+  const { engine } = engineFor({ store: fakeStore({ plan }), probe })
+  assert.equal(engine.describe().action, 'resume')
 })
 
 test('resume() journals each restored item and consumes the plan only when every item settled', async () => {
@@ -551,7 +574,7 @@ test('an old instance cannot write its pause result after a reload', async () =>
   assert.equal(outcome.reason, 'reloaded')
   assert.equal(store.state.writes.length, 1)
   assert.equal(store.state.plan.status, 'pausing')
-  assert.equal(engine.describe().action, 'pause')
+  assert.equal(engine.describe().action, 'resume')
 })
 
 test('a failed goal pause or job kill makes the stop partial and names the item', async () => {
