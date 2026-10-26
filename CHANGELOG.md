@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3
+
+- The dot now means one thing: something is waiting on you (a paused plan with commands that will not restart, or a stop/restore that failed). A clean idle page has no dot, and killed jobs live in the restore record instead of becoming a permanent red light.
+- Restore mounts sessions in bounded parallel batches, so wall time is the slowest batch instead of the sum of every session.
+- Duplicate attention rows for the same item are collapsed.
+
 ## 0.4.1
 
 A stop that could not finish no longer traps the button, and the dot stops lying after a resume.

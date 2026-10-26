@@ -320,7 +320,7 @@ test('resume() treats skipped and attention as settled and reports what needs a 
   assert.equal(store.state.journal.size, 0)
 })
 
-test('resume() reports killed jobs as gone and never claims to restart them', async () => {
+test('resume() records killed jobs as gone and never claims to restart them', async () => {
   const plan = {
     version: 2, planId: 'p1', status: 'paused', source: 'pause',
     sessions: [], goals: [], jobs: [{ id: 'j1', owner: 's1', status: 'running' }],
@@ -330,7 +330,8 @@ test('resume() reports killed jobs as gone and never claims to restart them', as
   const outcome = await engine.resume()
   assert.equal(outcome.status, 'resumed')
   assert.equal(outcome.summary.jobs, 1)
-  assert.match(outcome.summary.attention[0], /not restarted/u)
+  assert.match(outcome.summary.jobsStopped[0], /not restarted/u)
+  assert.equal(outcome.summary.attention.length, 0)
   assert.equal(probe.calls.some((call) => call[0] === 'job'), false)
 })
 
@@ -476,7 +477,7 @@ test('a partial pause retries the same plan instead of starting a second one', a
   assert.equal(store.state.plan.status, 'paused')
 })
 
-test('attention recorded by a restore survives the next boot instead of being re-delivered', async () => {
+test('a job a resume could not restart is recorded once, but never becomes a permanent dot', async () => {
   const plan = {
     version: 3, planId: 'p1', status: 'paused', source: 'pause', sessions: [],
     goals: [], jobs: [{ id: 'j1', owner: 's1', status: 'running' }], attention: [],
@@ -485,12 +486,15 @@ test('attention recorded by a restore survives the next boot instead of being re
   const first = engineFor({ store, probe: fakeProbe() }).engine
   await first.hydrate()
   const outcome = await first.resume()
-  assert.equal(outcome.summary.attention.length, 1)
-  assert.equal(store.state.result.summary.attention.length, 1)
+  // The killed command is evidence in the restore record, not an open obligation for the dot.
+  assert.equal(outcome.summary.attention.length, 0)
+  assert.deepEqual(outcome.summary.jobsStopped, ['job j1: stopped, not restarted'])
+  assert.equal(store.state.result.summary.attention.length, 0)
   const second = engineFor({ store, probe: fakeProbe() }).engine
   await second.hydrate()
   assert.equal(second.describe().phase, 'idle')
-  assert.equal(second.describe().attention, 1)
+  // A clean idle page shows no dot: nothing is waiting on the person.
+  assert.equal(second.describe().attention, 0)
 })
 
 // v0.4.0 regressions, one per failure that was reproduced against 0.3.0.
