@@ -86,3 +86,26 @@ test('a previous process running.json is offered as resume before any press', as
   assert.equal(value.error, null)
   rmSync(home, { recursive: true, force: true })
 })
+
+test('routes exist before hydration settles and state waits for it', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-pause-test-'))
+  const routes = []
+  process.env.DSH_HOME = home
+  const registry = {
+    webServer: { register: (route) => routes.push(route) },
+    sessionController: { cancel: async () => {}, resolveAgent: async () => undefined },
+    goals: { get: () => undefined, pause: () => {}, resume: () => {} },
+    jobs: { list: () => [], kill: () => {} },
+    agents: { get: () => undefined, list: () => [], resume: async () => {} },
+  }
+  apply({ get: (key) => registry[key], effect: () => {}, on: () => {} }, {})
+  // The Host freezes its route table when the server starts; a late register is a live 404 and the
+  // header button cannot ask for anything. Registration must therefore finish inside `apply`.
+  assert.equal(routes.length, 3, 'routes are registered synchronously')
+  const route = routes.find((entry) => entry.path === '/dsh-pause-resume/state')
+  const answer = { headersSent: false, status: 0, body: '', writeHead(status) { this.status = status }, end(body) { this.body = body ?? '' } }
+  await route.handler({ method: 'GET', headers: { host: '127.0.0.1:54601' } }, answer)
+  assert.equal(answer.status, 200)
+  assert.equal(JSON.parse(answer.body).phase, 'idle')
+  rmSync(home, { recursive: true, force: true })
+})

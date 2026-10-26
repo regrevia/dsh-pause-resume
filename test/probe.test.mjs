@@ -205,15 +205,18 @@ test('restoreSession() continues a stopped turn with one visible, idempotent mes
   const outcome = await probe.restoreSession({ sessionId: 's1', running: true, lastTurn: 4 }, { plan: { planId: 'pause-1' } })
   assert.equal(outcome.continued, true)
   const prompt = fake.calls.find((call) => call[0] === 'prompt')
-  assert.deepEqual(prompt, ['prompt', 's1', 'pause-1:continue:s1', 'queue', '接着来', true, true])
+  assert.deepEqual(prompt, ['prompt', 's1', 'pause-1:continue:s1:1', 'queue', '接着来', true, true])
   assert.equal(agent.status, 'running')
 })
 
-test('restoreSession() skips a turn the person already continued', async () => {
+test('restoreSession() does not resend after a turn already advanced', async () => {
   const fake = harness({ agents: [{ id: 's1', status: 'idle', phase: { lastTurn: 9 } }] })
   const probe = createProbe(fake.registry)
   const outcome = await probe.restoreSession({ sessionId: 's1', running: true, lastTurn: 4 }, { plan: { planId: 'p1' } })
-  assert.equal(outcome.status, 'skipped')
+  // A turn number past the baseline can mean the continuation ran, or that a turn was interrupted
+  // after admission. Neither allows a resend, and neither is a clean skip: it needs a look.
+  assert.equal(outcome.status, 'attention')
+  assert.match(outcome.detail, /not sent again/u)
   assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
 })
 
@@ -228,6 +231,17 @@ test('restoreSession() keeps a session that failed to mount retryable', async ()
   assert.match(outcome.detail, /REMOTE_CONFLICT/u)
 })
 
+test('restoreSession() leaves a subagent row to its parent instead of failing forever', async () => {
+  const failing = registry({
+    agents: { get: () => undefined, list: () => [] },
+    sessionController: { resolveAgent: async () => { throw new Error('session "s1" is owned by subagent routing') } },
+  })
+  const probe = createProbe(failing)
+  const outcome = await probe.restoreSession({ sessionId: 's1', running: false }, { plan: { planId: 'p1' } })
+  assert.equal(outcome.status, 'attention')
+  assert.match(outcome.detail, /parent restores it/u)
+})
+
 test('a continuation that already moved the turn is not sent twice', async () => {
   const agent = { id: 's1', status: 'idle', phase: { lastTurn: 4 } }
   const fake = harness({ agents: [agent] })
@@ -235,7 +249,7 @@ test('a continuation that already moved the turn is not sent twice', async () =>
   await probe.restoreSession({ sessionId: 's1', running: true, lastTurn: 4 }, { plan: { planId: 'p1' } })
   await probe.restoreSession({ sessionId: 's1', running: true, lastTurn: 4 }, { plan: { planId: 'p1' } })
   const ids = fake.calls.filter((call) => call[0] === 'prompt').map((call) => call[2])
-  assert.deepEqual(ids, ['p1:continue:s1'])
+  assert.deepEqual(ids, ['p1:continue:s1:1'])
   // Its request id is still derived only from the plan and session, so a retry before any turn
   // starts asks the Harness to dedupe the very same message instead of adding a second one.
   const third = await probe.restoreSession({ sessionId: 's1', running: false, lastTurn: 5 }, { plan: { planId: 'p1' } })
@@ -249,7 +263,7 @@ test('restoreGoal() arms the paused goal with its exact revision and refuses a c
     goals: { s1: { id: 'g1', revision: 8, phase: 'paused', activation: 'disarmed' } },
   })
   const probe = createProbe(fake.registry)
-  assert.deepEqual(await probe.restoreGoal({ sessionId: 's1', goalId: 'g1', pausedRevision: 8 }), { status: 'restored', detail: 'armed' })
+  assert.deepEqual(await probe.restoreGoal({ sessionId: 's1', goalId: 'g1', pausedRevision: 8 }), { status: 'restored', detail: 'armed', revision: 9 })
   assert.deepEqual(fake.calls.filter((call) => call[0] === 'goals.resume'), [['goals.resume', 's1', 'g1', 8]])
 
   // The person edited the goal after the pause: its revision moved, so this press must not revive it.
@@ -261,6 +275,46 @@ test('restoreGoal() arms the paused goal with its exact revision and refuses a c
   assert.equal((await second.restoreGoal({ sessionId: 's2', goalId: 'g2', pausedRevision: 8 })).status, 'skipped')
   assert.equal((await second.restoreGoal({ sessionId: 's2', goalId: 'g2', revision: 8 })).status, 'skipped')
   assert.equal(moved.calls.some((call) => call[0] === 'goals.resume'), false)
+})
+
+test('restoreSession() never continues a crash row, even when the turn was open', async () => {
+  const agent = { id: 's1', status: 'idle', phase: { lastTurn: 3 } }
+  const fake = harness({ agents: [agent] })
+  const probe = createProbe(fake.registry)
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', running: true, intent: 'mount', epoch: 0, crash: true, lastTurn: 3 },
+    { plan: { planId: 'crash-1' } },
+  )
+  assert.equal(outcome.continued, false)
+  assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
+})
+
+test('restoreSession() gives a new pause cycle a new request id', async () => {
+  const fake = harness({ agents: [{ id: 's1', status: 'idle', phase: { lastTurn: 4 } }] })
+  const probe = createProbe(fake.registry)
+  await probe.restoreSession({ sessionId: 's1', running: true, intent: 'continue', epoch: 1, lastTurn: 4 }, { plan: { planId: 'p1' } })
+  const agent = fake.live.get('s1')
+  agent.status = 'idle'
+  agent.phase.lastTurn = 5
+  await probe.restoreSession({ sessionId: 's1', running: true, intent: 'continue', epoch: 2, lastTurn: 5 }, { plan: { planId: 'p1' } })
+  const ids = fake.calls.filter((call) => call[0] === 'prompt').map((call) => call[2])
+  assert.deepEqual(ids, ['p1:continue:s1:1', 'p1:continue:s1:2'])
+})
+
+test('restoreGoal() re-arms an active goal only when this plan is what disarmed it', async () => {
+  const fake = harness({
+    agents: [{ id: 's1', status: 'idle' }],
+    goals: { s1: { id: 'g1', revision: 6, phase: 'active', activation: 'disarmed' } },
+  })
+  const probe = createProbe(fake.registry)
+  const refused = await probe.restoreGoal({ sessionId: 's1', goalId: 'g1', pausedRevision: 6 })
+  assert.equal(refused.status, 'skipped')
+  assert.equal(fake.calls.some((call) => call[0] === 'goals.resume'), false)
+
+  const own = await probe.restoreGoal({ sessionId: 's1', goalId: 'g1', pausedRevision: 6, armedRevision: 6 })
+  assert.equal(own.status, 'restored')
+  assert.equal(own.revision, 7)
+  assert.deepEqual(fake.calls.filter((call) => call[0] === 'goals.resume'), [['goals.resume', 's1', 'g1', 6]])
 })
 
 test('restoreGoal() leaves an active goal alone and reports a finished one', async () => {
@@ -301,8 +355,8 @@ test('crashPlan() mounts what a dead process was running but never continues it'
   assert.equal(plan.source, 'crash')
   assert.equal(plan.planId, 'crash-1')
   assert.deepEqual(plan.sessions, [
-    { sessionId: 's1', running: false, lastTurn: null, crash: true },
-    { sessionId: 's2', running: false, lastTurn: null, crash: true },
+    { sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true },
+    { sessionId: 's2', intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true },
   ])
   assert.deepEqual(plan.goals, [])
   assert.equal(probe.crashPlan(null), null)

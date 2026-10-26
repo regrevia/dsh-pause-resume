@@ -2,11 +2,12 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createStore } from './lib/snapshot.js'
 import { createEngine } from './lib/engine.js'
+import { nextEpoch, dropEpoch } from './lib/epoch.js'
 import { createHeartbeat } from './lib/heartbeat.js'
 import { createProbe, listRunning } from './lib/probe.js'
 
 export const name = 'dsh-pause-resume'
-export const VERSION = '0.3.0'
+export const VERSION = '0.4.0'
 
 const BASE_PATH = '/dsh-pause-resume'
 const BUTTON_HEADER = 'x-dsh-pause-resume'
@@ -117,13 +118,14 @@ function guard(handler) {
   }
 }
 
-function serve(ctx, engine, heartbeat, options) {
+function serve(ctx, engine, heartbeat, options, ready) {
   const server = service(ctx, 'webServer')
   if (server === undefined || server === null || typeof server.register !== 'function') {
     log('no web server: the header button cannot ask for a pause')
     return () => {}
   }
   const allowRemote = options.allowRemote === true
+  let disposed = false
   const route = (handler, read) => guard(async (req, res) => {
     const method = String(req?.method ?? 'GET').toUpperCase()
     if (read === true ? method !== 'GET' && method !== 'HEAD' : method !== 'POST') {
@@ -133,6 +135,10 @@ function serve(ctx, engine, heartbeat, options) {
     if (read === true ? sameOrigin(req, allowRemote) === false : buttonAllowed(req, allowRemote) === false) {
       return sendJson(res, 403, { status: 'forbidden' })
     }
+    // Routes are registered synchronously so the server freezes them before it starts. Hydration
+    // may still be reading crash residue, so every press waits for it instead of acting blind.
+    if (ready !== undefined) await ready
+    if (disposed === true) return sendJson(res, 503, { status: 'starting' })
     return handler(req, res)
   })
   const handlers = [
@@ -170,6 +176,7 @@ function serve(ctx, engine, heartbeat, options) {
     }
   }
   return () => {
+    disposed = true
     for (const dispose of disposers) {
       try {
         dispose()
@@ -212,10 +219,12 @@ export function apply(ctx, config = {}) {
     graceMs: Number.isFinite(config?.graceMs) ? config.graceMs : 2000,
     continueText: typeof config?.continueText === 'string' ? config.continueText : undefined,
   })
+  const epoch = nextEpoch()
   const engine = createEngine({
     store,
     probe,
     heartbeat,
+    epoch,
     bootId: bootId(),
     graceMs: Number.isFinite(config?.graceMs) ? config.graceMs : 2000,
     log,
@@ -225,6 +234,8 @@ export function apply(ctx, config = {}) {
   let disposeRoutes = () => {}
   const cleanup = () => {
     disposed = true
+    // The in-flight press, if any, checks this and refuses to write its stale result.
+    dropEpoch(epoch)
     try {
       disposeRoutes()
     } catch {}
@@ -264,21 +275,35 @@ export function apply(ctx, config = {}) {
     log(`cannot follow agent events: ${error?.message ?? error}`)
   }
 
+  // The server freezes its route table when it starts, so routes must be registered while `apply`
+  // is still synchronous. Hydration is asynchronous; the handlers wait on this promise.
+  let releaseReady = () => {}
+  const ready = new Promise((resolve) => {
+    releaseReady = resolve
+  })
+  const dispose = serve(ctx, engine, heartbeat, { allowRemote }, ready)
+  if (disposed) dispose()
+  else disposeRoutes = dispose
+
   void (async () => {
     try {
       // Read the previous process's record before `start()` overwrites it, and persist the crash
       // plan before the heartbeat goes away: a second restart then still sees the same work.
       const residue = heartbeat.peek()
-      await engine.hydrate({ residue })
+      const hydrated = await engine.hydrate({ residue })
       if (disposed) return
+      // Only overwrite the previous process's record after the residue is durable. Otherwise the
+      // next boot would read this process's nearly-empty heartbeat and lose the work entirely.
+      if (hydrated?.durable === false) {
+        log('crash residue is not durable; heartbeat not started')
+        return
+      }
       heartbeat.start()
-      if (disposed) return
-      const dispose = serve(ctx, engine, heartbeat, { allowRemote })
-      if (disposed) dispose()
-      else disposeRoutes = dispose
       log(`ready (${engine.phase})`)
     } catch (error) {
       log(`cannot start: ${error?.message ?? error}`)
+    } finally {
+      releaseReady()
     }
   })()
 

@@ -43,6 +43,7 @@ window.__ModuleLoader__.load({
       counts: { sessions: 0, goals: 0, jobs: 0 },
       live: { sessions: 0, goals: 0, jobs: 0 },
       attention: 0,
+      focus: null, // ui-copy-ignore
       error: null, // ui-copy-ignore
     }
 
@@ -141,7 +142,9 @@ window.__ModuleLoader__.load({
     function hintOf(state) {
       if (state.error === 'restore-partial') return COPY.partial
       if (state.error !== null && state.error !== undefined) return COPY.error
-      if ((state.attention ?? 0) > 0) return COPY.attention
+      if ((state.attention ?? 0) > 0) {
+        return typeof state.focus === 'string' && state.focus !== '' ? `${COPY.attention}: ${state.focus}` : COPY.attention
+      }
       if ((state.outstanding ?? 0) > 0) return COPY.stopped
       return ''
     }

@@ -46,6 +46,9 @@ request id is derived from the plan and the session, so a retry before a turn st
 by the Host. A failure leaves the plan on disk and the next press retries every item that still needs
 work.
 
+A subagent session cannot be mounted by this process: its parent chat owns the routing. That row is
+reported once as attention for the parent, not retried as a failure, so it never keeps the plan open.
+
 ## Crash, not just a press
 
 A press writes a snapshot. A crash writes nothing, so the plugin keeps a heartbeat instead:
