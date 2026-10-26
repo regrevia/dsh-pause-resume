@@ -30,6 +30,10 @@ function fakeStore({ plan = null, journal = [], failWrite = false, failConsume =
       state.result = record
       return true
     },
+    clearResult: () => {
+      state.result = null
+      return true
+    },
     lastRestore: () => state.result,
     readJournal: () => new Map([...state.journal.entries()]),
     appendJournal: (planId, key, status, boot) => {
@@ -912,6 +916,24 @@ test('distinct restore attention strings are counted separately and old job nois
   const state = engine.describe()
   assert.equal(state.attention, 2)
   assert.equal(state.focus, 's1')
+})
+
+test('a successful pause clears the previous restore report so its dot does not outlive the cycle', async () => {
+  const store = fakeStore()
+  store.state.result = {
+    summary: {
+      attention: ['session s1: continuation admitted, no turn started'],
+    },
+  }
+  const probe = fakeProbe({ readable: true, sessions: [{ sessionId: 's1', running: true, lastTurn: 2 }], goals: [], jobs: [] }, { canceled: ['s1'] })
+  const { engine } = engineFor({ store, probe })
+  await engine.hydrate()
+  assert.equal(engine.describe().attention, 1)
+
+  const outcome = await engine.pause()
+  assert.equal(outcome.status, 'paused')
+  assert.equal(store.state.result, null)
+  assert.equal(engine.describe().attention, 0)
 })
 
 test('a partial restore releases the heartbeat once the merged plan is durable', async () => {

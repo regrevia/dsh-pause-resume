@@ -149,6 +149,8 @@ test('consume archives first, then removes the plan it archived', () => {
   assert.equal(record.restoredAt, new Date(1000).toISOString())
   assert.equal(store.lastRestore().planId, 'p1')
   assert.equal(store.lastRestore().status, 'restored')
+  assert.equal(store.clearResult(), true)
+  assert.equal(store.lastRestore(), null)
   assert.equal(store.readJournal('p1').size, 0)
 })
 

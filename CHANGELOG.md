@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.8
+
+* A restore report could leave its attention dot on the header forever: the report is written once
+  and nothing cleared it after the person handled the item. A successful pause now starts a new
+  cycle and removes the previous report, so the dot reflects only the work the current plan owns.
+
 ## 0.4.7
 
 Four restore-boundary bugs and two reporting gaps found in the 0.4.6 review.
