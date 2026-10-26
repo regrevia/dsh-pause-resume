@@ -70,6 +70,8 @@ file only when the set changes: no per-turn hooks, nothing to install into the a
 * A crash record only proves a turn was open, not that the person wanted it continued. Restore mounts
   those sessions and lists them in the outcome; it never posts a continuation message that no one
   asked for.
+* `pending.json` is written before `running.json` is replaced, so the plan outlives a reload and a
+  second restart. It is removed only after the restore outcome is archived.
 
 Goals need no heartbeat: the goal lives in the session log, so after a session is mounted
 `goals.get` answers with the truth.
@@ -105,9 +107,10 @@ Restore reverses the same file and nothing else:
    removed from `snapshot.json`. Consuming it is the only way to guarantee a second press restores
    nothing.
 
-Every item is journalled to `journal/<planId>.jsonl` before the next one starts. A crash in the middle
-of a restore therefore leaves ▶ up, and the next press continues with the remainder instead of redoing
-sessions that are already mounted. A failed item is not journalled and stays retryable.
+Every attempt is appended to `journal/<planId>.jsonl` with the id of the process that made it. A new
+process counts an item as outstanding unless this boot has a row for it, so a crash in the middle of a
+restore leaves ▶ up and the next press asks the live Harness about every item again: mounting is
+idempotent, and a turn that already moved is reported as skipped instead of being continued twice.
 
 ## Service contracts that cost a day if guessed
 
@@ -145,7 +148,7 @@ sessions that are already mounted. A failed item is not journalled and stays ret
 | Two windows press at once | second gets `busy`; one press, one snapshot |
 | Double click | second press is refused by the transient phase |
 | Crash while `pausing` | next boot reports unfinished pause and offers ▶; sessions are mounted, never continued |
-| Crash while `resuming` | journal continues with the remainder |
+| Crash while `resuming` | journal is evidence, not truth: every item is checked again; delivered work is not repeated |
 | Snapshot names a deleted session | skipped, named in the outcome |
 | Goal revision changed by hand | skipped rather than resurrected |
 | Session already running when restored | skipped |
@@ -161,7 +164,8 @@ All state lives under `$DSH_HOME/pause-resume/`:
 | File | Purpose |
 | --- | --- |
 | `snapshot.json` | the work a press stopped, `pausing` or `paused` |
-| `journal/<planId>.jsonl` | restore items already finished |
+| `pending.json` | a crash plan, kept until a restore finishes |
+| `journal/<planId>.jsonl` | restore attempts, tagged with the boot that made them |
 | `restores/<planId>.json` | the archived plan, kept as a record of the last restore |
 | `last-restore.json` | summary of the last restore |
 | `running.json` | sessions with an open turn, for crash residue |

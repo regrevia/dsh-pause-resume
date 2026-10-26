@@ -40,11 +40,11 @@ test('a written plan reads back and owns the version field', () => {
   assert.equal(store.dir, root)
   assert.equal(store.snapshotPath, join(root, 'snapshot.json'))
   const written = store.write(draft({ version: 1 }))
-  assert.equal(written.version, 2)
+  assert.equal(written.version, 3)
   assert.equal(written.planId, 'p1')
   assert.equal(store.read().status, 'paused')
   assert.equal(store.read().sessions[0].sessionId, 's1')
-  assert.equal(JSON.parse(readFileSync(store.snapshotPath, 'utf8')).version, 2)
+  assert.equal(JSON.parse(readFileSync(store.snapshotPath, 'utf8')).version, 3)
   assert.equal(store.hasSnapshot(), true)
   assert.deepEqual(readdirSync(root), ['snapshot.json'])
 })
@@ -61,7 +61,7 @@ test('a missing or broken plan is null and never throws', () => {
   assert.equal(store.read(), null)
   assert.equal(store.hasSnapshot(), false)
   store.write(draft())
-  for (const body of ['{"version":2,', 'null', '[]', JSON.stringify({ version: 1, status: 'paused' }), JSON.stringify({ version: 2, status: 'idle' })]) {
+  for (const body of ['{"version":3,', 'null', '[]', JSON.stringify({ version: 3, status: 'idle' }), JSON.stringify({ version: 4, status: 'paused' })]) {
     writeFileSync(store.snapshotPath, body)
     assert.equal(store.read(), null)
   }
@@ -119,7 +119,7 @@ test('the journal survives a torn last line and clears', () => {
   store.appendJournal('p1', 's:s1')
   store.appendJournal('p1', 'g:g1')
   writeFileSync(join(store.dir, 'journal', 'p1.jsonl'), `${readFileSync(join(store.dir, 'journal', 'p1.jsonl'), 'utf8')}{"k":"s:s2`)
-  assert.deepEqual([...store.readJournal('p1')], ['s:s1', 'g:g1'])
+  assert.deepEqual([...store.readJournal('p1').keys()], ['s:s1', 'g:g1'])
   store.clearJournal('p1')
   assert.equal(store.readJournal('p1').size, 0)
 })
@@ -159,7 +159,7 @@ test('a failed archive keeps the plan and the journal', () => {
   store.write(draft())
   store.appendJournal('p1', 's:s1')
   const outcome = store.consume(store.read(), { restored: ['session s1'], skipped: [], failed: [], jobs: 0 })
-  assert.deepEqual(outcome, { ok: false, archivePath: null })
+  assert.deepEqual(outcome, { ok: false, archivePath: null, published: false })
   assert.equal(store.hasSnapshot(), true)
   assert.equal(store.read().planId, 'p1')
   assert.equal(store.lastRestore(), null)
@@ -187,5 +187,35 @@ test('a directory that cannot be created answers null instead of throwing', () =
   assert.equal(store.appendJournal('p1', 'k'), false)
   assert.equal(store.readJournal('p1').size, 0)
   assert.equal(store.lastRestore(), null)
-  assert.deepEqual(store.consume(draft(), null), { ok: false, archivePath: null })
+  assert.deepEqual(store.consume(draft(), null), { ok: false, archivePath: null, published: false })
+})
+
+test('a version 1 plan is migrated conservatively instead of ignored', () => {
+  const root = dir()
+  writeFileSync(join(root, 'snapshot.json'), JSON.stringify({ version: 1, status: 'paused', sessions: [{ sessionId: 's1', running: true }], goals: [{ sessionId: 's1', goalId: 'g1' }] }))
+  const store = createStore(root)
+  const plan = store.read()
+  assert.equal(plan.source, 'legacy')
+  assert.equal(plan.planId.startsWith('legacy-'), true)
+  assert.equal(plan.sessions[0].running, false)
+  assert.equal(plan.goals[0].revision, null)
+  assert.equal(plan.attention.length, 1)
+})
+
+test('the crash plan is durable before anything else reads the heartbeat', () => {
+  const root = dir()
+  const store = createStore(root)
+  const crashed = { version: 3, planId: 'crash-1', source: 'crash', status: 'paused', sessions: [{ sessionId: 's1' }], goals: [], jobs: [], attention: [] }
+  assert.equal(store.writePending(crashed).planId, 'crash-1')
+  const again = createStore(root)
+  assert.equal(again.readPending().planId, 'crash-1')
+  assert.equal(again.read(), null)
+})
+
+test('a journal row records the boot that wrote it', () => {
+  const store = createStore(dir())
+  store.appendJournal('p1', 's:s1', 'restored', 'boot-a')
+  const row = store.readJournal('p1').get('s:s1')
+  assert.equal(row.status, 'restored')
+  assert.equal(row.boot, 'boot-a')
 })

@@ -72,16 +72,21 @@ function harness({ agents = [], goals = {}, jobs = {}, unownedJobs = [], keepRun
           }
         }
       },
+      // The shipped service answers `{agent}` when it had to mount, and the live Agent itself when
+      // it was already there. Callers unwrap one or the other; this fake keeps both shapes.
       resolveAgent: async (sessionId) => {
         calls.push(['resolveAgent', sessionId])
         const existing = live.get(sessionId)
         if (existing !== undefined) return existing
         const agent = { id: sessionId, status: 'idle', phase: { lastTurn: 0 }, mounted: true }
         live.set(sessionId, agent)
-        return agent
+        return { agent }
       },
-      prompt: async (request, source, signal) => {
-        calls.push(['prompt', request.sessionId, request.requestId, request.mode, request.content[0].text, source.rpcId, signal instanceof AbortSignal])
+      // The transport takes `(request, signal)`: it checks the signal before admitting anything and
+      // dispatches `agent.followup` or `agent.steer`. `{accepted:true}` is admission, not a turn.
+      prompt: async (request, signal) => {
+        calls.push(['prompt', request.sessionId, request.requestId, request.mode, request.content[0].text, signal instanceof AbortSignal, typeof signal?.throwIfAborted === 'function'])
+        signal.throwIfAborted()
         const agent = live.get(request.sessionId)
         if (agent === undefined) throw new Error('SESSION_NOT_FOUND')
         agent.status = 'running'
@@ -200,7 +205,7 @@ test('restoreSession() continues a stopped turn with one visible, idempotent mes
   const outcome = await probe.restoreSession({ sessionId: 's1', running: true, lastTurn: 4 }, { plan: { planId: 'pause-1' } })
   assert.equal(outcome.continued, true)
   const prompt = fake.calls.find((call) => call[0] === 'prompt')
-  assert.deepEqual(prompt, ['prompt', 's1', 'pause-1:continue:s1', 'followup', '接着来', 'pause-1:continue:s1', true])
+  assert.deepEqual(prompt, ['prompt', 's1', 'pause-1:continue:s1', 'queue', '接着来', true, true])
   assert.equal(agent.status, 'running')
 })
 
@@ -221,6 +226,20 @@ test('restoreSession() keeps a session that failed to mount retryable', async ()
   const outcome = await probe.restoreSession({ sessionId: 's1', running: false }, { plan: { planId: 'p1' } })
   assert.equal(outcome.status, 'failed')
   assert.match(outcome.detail, /REMOTE_CONFLICT/u)
+})
+
+test('a continuation that already moved the turn is not sent twice', async () => {
+  const agent = { id: 's1', status: 'idle', phase: { lastTurn: 4 } }
+  const fake = harness({ agents: [agent] })
+  const probe = createProbe(fake.registry)
+  await probe.restoreSession({ sessionId: 's1', running: true, lastTurn: 4 }, { plan: { planId: 'p1' } })
+  await probe.restoreSession({ sessionId: 's1', running: true, lastTurn: 4 }, { plan: { planId: 'p1' } })
+  const ids = fake.calls.filter((call) => call[0] === 'prompt').map((call) => call[2])
+  assert.deepEqual(ids, ['p1:continue:s1'])
+  // Its request id is still derived only from the plan and session, so a retry before any turn
+  // starts asks the Harness to dedupe the very same message instead of adding a second one.
+  const third = await probe.restoreSession({ sessionId: 's1', running: false, lastTurn: 5 }, { plan: { planId: 'p1' } })
+  assert.equal(third.status, 'restored')
 })
 
 test('restoreGoal() arms the paused goal with its exact revision and refuses a changed goal', async () => {
@@ -253,8 +272,8 @@ test('restoreGoal() leaves an active goal alone and reports a finished one', asy
     },
   })
   const probe = createProbe(fake.registry)
-  assert.equal((await probe.restoreGoal({ sessionId: 's1', goalId: 'g1', pausedRevision: 3 })).status, 'restored')
-  assert.equal((await probe.restoreGoal({ sessionId: 's2', goalId: 'g2', pausedRevision: 4 })).status, 'attention')
+  assert.equal((await probe.restoreGoal({ sessionId: 's1', goalId: 'g1', revision: 3 })).status, 'skipped')
+  assert.equal((await probe.restoreGoal({ sessionId: 's2', goalId: 'g2', pausedRevision: 4 })).status, 'skipped')
   assert.equal(fake.calls.some((call) => call[0] === 'goals.resume'), false)
 })
 

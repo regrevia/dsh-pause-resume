@@ -40,15 +40,19 @@ A restore is not a claim that work continued. It is three honest steps per item:
 3. **Re-arm a goal** with the revision it had when paused. The revision is the person's veto: if the
    goal changed while paused, it is not ours to resume and the item is `skipped`.
 
-Every finished item is journaled before the plan is archived, so a crash in the middle of a restore
-continues with the remainder instead of restoring the same session twice. A failure leaves the plan
-and the journal on disk: the next press retries only the failed item.
+Every attempt is journaled with the id of the process that made it, but a journal is reporting, not a
+promise: the next boot asks the live Harness again instead of trusting an old row. The continuation
+request id is derived from the plan and the session, so a retry before a turn starts is deduplicated
+by the Host. A failure leaves the plan on disk and the next press retries every item that still needs
+work.
 
 ## Crash, not just a press
 
 A press writes a snapshot. A crash writes nothing, so the plugin keeps a heartbeat instead:
 `running.json` holds the sessions whose turn is open right now and the id of the process that wrote
-it. A new process finds the previous process's record and offers ▶ with no press needed.
+it. The previous process's record is turned into a crash plan in `pending.json` before the heartbeat
+file is replaced, so a second or third restart still sees the same work and offers ▶ with no press
+needed.
 
 A crash record is deliberately weaker than a press: it proves a turn was open, not whether the person
 wanted it continued. So restore mounts those sessions and lists them in the outcome; it does not
@@ -74,8 +78,8 @@ machine; local-only is the default.
   a double press and a tool call cannot overlap. The second caller is told `busy`.
 * **Durable before destructive.** No turn is cancelled until the plan is on disk. A failed write means
   nothing was stopped.
-* **Idempotent.** A restore journals every finished item; the continuation request id is derived from
-  the plan, so a retry cannot post the same message twice.
+* **Idempotent.** The continuation request id is derived from the plan and the session, so a retry
+  cannot post the same message twice; a turn that already moved is not continued again.
 * **Honest.** Unreadable state never reports `paused`. A session deleted by hand, a goal changed by
   hand, a session already running: each is skipped and named in the outcome.
 * **No hidden takeover.** There is no public API to detach an agent, so the pause guarantee is
@@ -92,7 +96,8 @@ All state lives under `$DSH_HOME/pause-resume/`:
 | File | Purpose |
 | --- | --- |
 | `snapshot.json` | the work a press stopped, `pausing` or `paused` |
-| `journal/<planId>.jsonl` | restore items already finished |
+| `pending.json` | a crash plan, kept until a restore finishes |
+| `journal/<planId>.jsonl` | restore attempts, tagged with the boot that made them |
 | `restores/<planId>.json` | the archived plan, kept as a record of the last restore |
 | `last-restore.json` | summary of the last restore |
 | `running.json` | sessions with an open turn, for crash residue |

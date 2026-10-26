@@ -6,7 +6,7 @@ import { createHeartbeat } from './lib/heartbeat.js'
 import { createProbe, listRunning } from './lib/probe.js'
 
 export const name = 'dsh-pause-resume'
-export const VERSION = '0.2.0'
+export const VERSION = '0.3.0'
 
 const BASE_PATH = '/dsh-pause-resume'
 const BUTTON_HEADER = 'x-dsh-pause-resume'
@@ -147,7 +147,7 @@ function serve(ctx, engine, heartbeat, options) {
       route(async (req, res) => {
         const outcome = await engine.pause()
         log(`pause: ${outcome.status}${outcome.status === 'busy' ? ` (${outcome.phase})` : ''}`)
-        if (outcome.status === 'paused') heartbeat.release()
+        if (outcome.status === 'paused' || outcome.status === 'partial') heartbeat.release()
         sendJson(res, 200, { ...engine.describe(), outcome })
       }, false),
     ],
@@ -216,6 +216,7 @@ export function apply(ctx, config = {}) {
     store,
     probe,
     heartbeat,
+    bootId: bootId(),
     graceMs: Number.isFinite(config?.graceMs) ? config.graceMs : 2000,
     log,
   })
@@ -265,11 +266,12 @@ export function apply(ctx, config = {}) {
 
   void (async () => {
     try {
-      // The heartbeat claims the previous process's record in `start`, and the engine's crash plan
-      // is derived from that claim: start first, or the residue is read as absent and lost.
-      heartbeat.start()
+      // Read the previous process's record before `start()` overwrites it, and persist the crash
+      // plan before the heartbeat goes away: a second restart then still sees the same work.
+      const residue = heartbeat.peek()
+      await engine.hydrate({ residue })
       if (disposed) return
-      await engine.hydrate()
+      heartbeat.start()
       if (disposed) return
       const dispose = serve(ctx, engine, heartbeat, { allowRemote })
       if (disposed) dispose()

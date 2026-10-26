@@ -172,24 +172,36 @@ window.__ModuleLoader__.load({
         ensureStyle()
         mounted.current = true
         let timer = null
+        let stopped = false
         let current = null
-        const beat = () => {
-          if (document.visibilityState !== 'visible' || inflight.current !== null) return
-          try {
-            current?.abort()
-          } catch {}
+        // One request at a time, and the next one starts after this one settles. A fixed interval
+        // that aborts its own predecessor made any answer slower than the interval invisible.
+        const beat = async () => {
+          timer = null
+          if (stopped || document.visibilityState !== 'visible' || inflight.current !== null) { schedule() ; return }
           current = typeof AbortController === 'function' ? new AbortController() : null
-          void pull(current?.signal)
+          try {
+            await pull(current?.signal)
+          } finally {
+            current = null
+            schedule()
+          }
         }
-        beat()
-        timer = setInterval(beat, POLL_MS)
+        const schedule = () => {
+          if (stopped || timer !== null) return
+          timer = setTimeout(() => { void beat() }, POLL_MS)
+        }
         const onVisible = () => {
-          if (document.visibilityState === 'visible') beat()
+          if (document.visibilityState !== 'visible') return
+          if (timer !== null) { clearTimeout(timer); timer = null }
+          void beat()
         }
+        void beat()
         document.addEventListener('visibilitychange', onVisible)
         return () => {
+          stopped = true
           mounted.current = false
-          if (timer !== null) clearInterval(timer)
+          if (timer !== null) clearTimeout(timer)
           try {
             current?.abort()
           } catch {}
