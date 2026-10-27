@@ -1,3 +1,11 @@
+## 0.4.13
+
+Every answer from `/state`, `/pause` and `/resume` carried `version: '0.4.9'`. The literal was
+written once and then not touched while the package advanced through three releases, so anyone
+reading the field — a bug report, a log line, a future client refusing an old Host — was told the
+wrong build. The version now comes from `package.json`, and a test compares the exported constant,
+the manifest and a real `/state` answer, so the two can never drift again.
+
 ## 0.4.12
 
 A crash record answered the state question with a flag that described a stop which never

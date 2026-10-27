@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createStore } from './lib/snapshot.js'
@@ -7,7 +8,20 @@ import { createHeartbeat } from './lib/heartbeat.js'
 import { createProbe, listRunning } from './lib/probe.js'
 
 export const name = 'dsh-pause-resume'
-export const VERSION = '0.4.9'
+
+/**
+ * The version every response carries. It is read from the manifest instead of being a second
+ * literal, because the literal was forgotten for three releases while the package moved on: an
+ * answer that names the wrong build is worse than no answer when someone is diagnosing a restart.
+ */
+export const VERSION = (() => {
+  try {
+    const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+    return typeof manifest?.version === 'string' && manifest.version !== '' ? manifest.version : 'unknown'
+  } catch {
+    return 'unknown'
+  }
+})()
 
 const BASE_PATH = '/dsh-pause-resume'
 const BUTTON_HEADER = 'x-dsh-pause-resume'

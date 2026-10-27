@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { apply } from '../index.js'
+import { apply, VERSION } from '../index.js'
 
 /** Mount the plugin the way the Host does: one registry, one effect collector, one route table. */
 async function mount(services = {}, home = mkdtempSync(join(tmpdir(), 'dsh-pause-test-'))) {
@@ -42,6 +42,14 @@ test('the mount registers the three routes and answers state', async () => {
   assert.equal(status, 200)
   assert.equal(value.phase, 'idle')
   assert.equal(value.action, 'none')
+})
+
+test('every answer names the version in the manifest, never a second forgotten literal', async () => {
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.equal(VERSION, manifest.version)
+  const { call } = await mount()
+  const { value } = await call('/dsh-pause-resume/state')
+  assert.equal(value.version, manifest.version)
 })
 
 test('a live turn and an armed goal turn the glyph into pause', async () => {
