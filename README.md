@@ -59,11 +59,13 @@ it. The previous process's record is turned into a crash plan in `pending.json` 
 file is replaced, so a second or third restart still sees the same work and offers ▶ with no press
 needed.
 
-A crash record is deliberately weaker than a press: it proves a session existed, not that a turn was
-open after the restart. The record carries the turn number the dead process last saw; restore continues
-a row only when the live session shows the same turn. Any other row is reported as skipped and left
-alone, because mounting it can fire a queued prompt and open a turn nobody asked for. A goal whose
-session is not continued is reported as attention instead of being re-armed. Sessions that ended
+A crash record is weaker than a press: it proves a session existed, not that a turn was open after the
+restart. Restore attaches every recorded session and reads the live turn. A row whose turn is still
+running is continued; a row that is idle is left idle by the probe, which mounts it to read it and does
+not prompt it. A row whose state cannot be read or proven is reported as unknown, and unknown is not
+finished: the plan stays on disk, the button keeps offering ▶, and the next press tries again. A
+recorded goal is restored whether or not its session's turn is provable, because dropping it was the
+path that ended a crashed set with every goal in attention and none resumed. Sessions that ended
 normally never enter the file.
 
 The same process reloading the plugin (hot reload) sees its own id and knows there is nothing to
@@ -200,5 +202,5 @@ MIT.
 ---
 
 一行说明：会话头一个按钮，⏸ 停掉正在跑的回合、目标与后台任务；重启后同一个按钮变 ▶，把上次的工作
-接回来。正常结束的会话不记录、不恢复；崩溃只恢复回合号对得上的会话，其余不启动、目标不重挂；日程不会被动
+接回来。正常结束的会话不记录、不恢复；崩溃会接回记录里的会话与其目标，暂时无法确认状态的会话保持计划未完成，按钮继续给 ▶；日程不会被动
 （该服务只有删除，没有停用），后台命令只记录不重跑。

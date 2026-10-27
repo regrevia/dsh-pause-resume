@@ -171,6 +171,8 @@ window.__ModuleLoader__.load({
       /** Each answer carries a number: a slow reply may never overwrite a newer one. */
       const seq = React.useRef(0)
       const inflight = React.useRef(null)
+      /** Distinguishes presses so a superseded one cannot clear the newer one's state. */
+      const pressToken = React.useRef(0)
 
       const apply = React.useCallback((next) => {
         if (!mounted.current || next === null) return
@@ -195,7 +197,9 @@ window.__ModuleLoader__.load({
         // that aborts its own predecessor made any answer slower than the interval invisible.
         const beat = async () => {
           timer = null
-          if (stopped || document.visibilityState !== 'visible' || inflight.current !== null) { schedule() ; return }
+          // The poll keeps running while a press waits for its answer: the answer can take a whole
+          // restore, and a frozen glyph is what made the button look dead during one.
+          if (stopped || document.visibilityState !== 'visible') { schedule() ; return }
           current = typeof AbortController === 'function' ? new AbortController() : null
           try {
             await pull(current?.signal)
@@ -233,10 +237,22 @@ window.__ModuleLoader__.load({
       const disabled = action === null && !busy
 
       const onClick = async () => {
-        if (busy || action === null || inflight.current !== null) return
+        if (busy || action === null) return
+        if (inflight.current !== null) {
+          // A restore in flight still answers the press that started it, so its request can sit open
+          // for the whole restore. Pressing pause now means "stop that restore": drop this tab's wait
+          // and let the new press interrupt the restore and keep the plan.
+          if (action !== 'pause') return
+          try {
+            inflight.current.abort()
+          } catch {}
+          inflight.current = null
+        }
         // One press at a time, in this tab and across tabs: the Host also refuses an overlapping // ui-copy-ignore
         // press, so a second window's button settles on the same answer instead of starting work.
         const controller = typeof AbortController === 'function' ? new AbortController() : null
+        const mine = pressToken.current + 1
+        pressToken.current = mine
         inflight.current = controller
         setPressing(true)
         try {
@@ -253,8 +269,10 @@ window.__ModuleLoader__.load({
             }
           }
         } finally {
-          inflight.current = null
-          if (mounted.current) setPressing(false)
+          if (pressToken.current === mine) {
+            inflight.current = null
+            if (mounted.current) setPressing(false)
+          }
         }
       }
 

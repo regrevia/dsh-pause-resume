@@ -1,3 +1,30 @@
+## 0.5.4
+
+A crashed set is restored or kept, never declared restored with nothing started. This fixes the report
+that the icon flipped to play but no session came back, and the plan was already gone so pressing again
+did nothing.
+
+* Crash rows are no longer skipped before the probe sees them. Every recorded session is attached and
+  read; the probe decides continue, idle or unknown from the live turn, instead of the engine deciding
+  from a saved field that the old writer never filled.
+* A goal recorded in a crash plan is restored. The gate that reported every crashed goal as attention
+  whenever its session's predecessor turn was unprovable is gone; that gate turned a full crashed set
+  into 6/6 attention with zero `goals.resume` calls.
+* `unknown` is a non-terminal outcome: it is not a failure, it is not written as a finished row, and a
+  restore that ends with unproven rows keeps the plan and returns `partial`. Consuming the plan there is
+  what made one press erase the work it had just failed to start.
+* Running out of attempts no longer closes the plan as attention. Failed rows stay outstanding, the
+  plan stays on disk, and every later press offers the same restore.
+* Journal rows carry the epoch they belong to and the continued turn, so a row from an earlier boot is
+  re-checked against the live continuation instead of being trusted by name alone.
+* A restore that is interrupted aborts its provider calls and child prompts through one signal.
+* Missing parents are added as mount rows, so a child whose parent was not recorded can still restore.
+* The button keeps polling while a restore is in flight, and pressing pause during one now reaches the
+  Host and interrupts it instead of being ignored until the restore answers.
+* Tests: crash sessions and their goals are attached and re-armed; unproven rows keep the plan open;
+  a plan that never comes back is never consumed; the heartbeat crash record is read by the real plan
+  reader.
+
 ## 0.5.3
 
 A resume no longer starts work that was not working when the process stopped, the button turns into a
