@@ -282,14 +282,20 @@ test('restoreSession() wakes a stopped child through subagents.prompt once its p
   ])
 })
 
-test('restoreSession() waits for the parent instead of dropping the child', async () => {
+test('restoreSession() reports a missing parent as retryable instead of dropping the child', async () => {
   const calls = []
   const probe = createProbe(registry({
     agents: { get: () => undefined, list: () => [] },
     subagents: { prompt: async (request) => { calls.push(request) } },
   }))
-  const outcome = await probe.restoreSession({ sessionId: 'c1', parent: 'p1', origin: 'subagent', intent: 'continue', epoch: 1, lastTurn: 5 }, { plan: { planId: 'pause-9' } })
-  assert.equal(outcome.status, 'attention')
+  // `failed` is retryable, `attention` was not: a child whose parent was still mounting used to be
+  // given up on for the rest of the plan. A short settle keeps this test fast while still exercising
+  // the wait loop.
+  const outcome = await probe.restoreSession(
+    { sessionId: 'c1', parent: 'p1', origin: 'subagent', intent: 'continue', epoch: 1, lastTurn: 5 },
+    { plan: { planId: 'pause-9' }, settleMs: 40 },
+  )
+  assert.equal(outcome.status, 'failed')
   assert.match(outcome.detail, /parent is not live/u)
   assert.equal(calls.length, 0)
 })
@@ -401,7 +407,7 @@ test('restoreGoal() mounts the session first, then re-arms its goal', async () =
   assert.deepEqual(fake.calls.filter((call) => call[0] === 'resolveAgent'), [['resolveAgent', 's1']])
 })
 
-test('crashPlan() mounts what a dead process was running but never continues it', () => {
+test('crashPlan() records what a dead process carried without inventing a turn for it', () => {
   const probe = createProbe(registry({}))
   const plan = probe.crashPlan({ sessions: [{ sessionId: 's1' }, { sessionId: 's2' }], at: 1700000000000 }, { planId: 'crash-1' })
   assert.equal(plan.source, 'crash')
@@ -411,7 +417,7 @@ test('crashPlan() mounts what a dead process was running but never continues it'
     { sessionId: 's2', intent: 'mount', epoch: 0, running: false, lastTurn: null, parent: null, origin: 'root', crash: true },
   ])
   assert.deepEqual(plan.goals, [])
-  assert.deepEqual(plan.attention, [{ kind: 'session', id: '', detail: 'crashed before it could be paused: 2 session(s) reattached without re-sending a turn' }])
+  assert.deepEqual(plan.attention, [{ kind: 'session', id: '', detail: 'crashed before it could be paused: 2 session(s) left alone' }])
   assert.equal(plan.crashes, 2)
   assert.equal(probe.crashPlan(null), null)
   assert.equal(probe.crashPlan({ sessions: [] }), null)
@@ -444,8 +450,8 @@ test('crashPlan() carries armed goals over without faking a pause', () => {
     { planId: 'crash-2' },
   )
   assert.deepEqual(plan.goals, [
-    { sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: 4 },
-    { sessionId: 's2', goalId: 'g2', revision: 9, armedRevision: 9 },
+    { sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: 4, crash: true },
+    { sessionId: 's2', goalId: 'g2', revision: 9, armedRevision: 9, crash: true },
   ])
   // The goal row survives even when its session was not running between rounds.
   assert.equal(plan.sessions.length, 1)
@@ -455,7 +461,7 @@ test('crashPlan() carries armed goals over without faking a pause', () => {
   const goalsOnly = probe.crashPlan({ sessions: [], goals: [{ sessionId: 's2', goalId: 'g2', revision: 9 }] }, { planId: 'crash-3' })
   assert.equal(goalsOnly !== null, true)
   assert.deepEqual(goalsOnly.sessions, [])
-  assert.deepEqual(goalsOnly.goals, [{ sessionId: 's2', goalId: 'g2', revision: 9, armedRevision: 9 }])
+  assert.deepEqual(goalsOnly.goals, [{ sessionId: 's2', goalId: 'g2', revision: 9, armedRevision: 9, crash: true }])
   assert.deepEqual(goalsOnly.attention, [])
 })
 
@@ -472,7 +478,7 @@ test('crashPlan() drops goal rows that cannot be proven instead of guessing a re
     },
     { planId: 'crash-4' },
   )
-  assert.deepEqual(plan.goals, [{ sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: 4 }])
+  assert.deepEqual(plan.goals, [{ sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: 4, crash: true }])
 })
 
 test('crashPlan() never turns an empty session id into a mount row', () => {
@@ -828,4 +834,65 @@ test('a retried attempt sends a new request id so the prompt dedupe cannot swall
   assert.equal(ids[0], 'p-retry:continue:s1')
   assert.equal(ids[1], 'p-retry:continue:s1.r1')
   assert.notEqual(ids[0], ids[1])
+})
+
+test('restoreSession() waits for a parent that is still mounting, then delivers with an abort signal', async () => {
+  const born = Date.now() + 80
+  const parentAgent = { id: 'p1', status: 'idle', phase: { lastTurn: 2 } }
+  const childAgent = { id: 'c1', status: 'idle', phase: { lastTurn: 5 } }
+  const calls = []
+  const probe = createProbe(registry({
+    agents: {
+      get: (id) => {
+        // The parent mounts a moment after the child row is looked at.
+        if (id === 'p1') return Date.now() >= born ? parentAgent : undefined
+        if (id === 'c1') return childAgent
+        return undefined
+      },
+      list: () => [parentAgent, childAgent],
+    },
+    subagents: {
+      prompt: async (request, signal) => {
+        calls.push({ request, signal })
+        // The delivery starts the child's turn, which is what a restored child looks like.
+        childAgent.phase.lastTurn += 1
+      },
+    },
+  }), { settleMs: 2000 })
+  const outcome = await probe.restoreSession(
+    { sessionId: 'c1', parent: 'p1', origin: 'subagent', intent: 'continue', epoch: 1, lastTurn: 5 },
+    { plan: { planId: 'pause-wait' }, settleMs: 2000 },
+  )
+  assert.equal(outcome.status, 'restored')
+  assert.equal(calls.length, 1)
+  // The remote prompt route needs a real signal; passing none is what made every child row throw
+  // "Cannot read properties of undefined (reading 'aborted')".
+  assert.equal(typeof calls[0].signal?.throwIfAborted, 'function')
+  assert.equal(calls[0].signal.aborted, false)
+  assert.equal(calls[0].request.childSessionId, 'c1')
+  assert.equal(calls[0].request.parentSessionId, 'p1')
+})
+
+test('stop() re-cancels a turn that shrugs off the first cancel', async () => {
+  const agent = { id: 's1', status: 'running', phase: { lastTurn: 0 } }
+  let cancels = 0
+  const services = {
+    agents: { get: () => agent, list: () => [agent] },
+    jobs: { list: () => [], kill: () => {} },
+    sessionController: {
+      cancel: async () => {
+        cancels += 1
+        // The first cancel is ignored: only the retry inside the grace window ends the turn.
+        if (cancels >= 2) {
+          agent.status = 'idle'
+          agent.phase.lastTurn += 1
+        }
+      },
+    },
+  }
+  const probe = createProbe(registry(services), { graceMs: 800 })
+  const stopped = await probe.stop(probe.live())
+  assert.ok(cancels >= 2, `expected a retry, saw ${cancels} cancel(s)`)
+  assert.deepEqual(stopped.stillRunning, [])
+  assert.deepEqual(stopped.canceled, ['s1'])
 })

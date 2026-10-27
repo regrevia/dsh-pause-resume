@@ -1,3 +1,33 @@
+## 0.5.3
+
+A resume no longer starts work that was not working when the process stopped, the button turns into a
+pause as soon as a restore begins, and a child or a stubborn turn is no longer dropped mid-restore.
+
+* A crash row is evidence the session existed, not evidence a turn was open after the restart. Rows
+  whose saved turn number does not match the live one are now reported as skipped instead of being
+  mounted, because mounting can fire queued prompts and open a turn nobody asked for. Their goals are
+  reported as attention for the same reason: an unproven owner is not re-armed.
+* The glyph follows the work again during a restore: while `resuming`, the button shows the pause so
+  the press can stop the restore. Before, the unfinished plan kept it on play, so sessions were
+  visibly running while the icon still offered to start them. An unfinished plan still shows play
+  outside a restore, because pausing on top of one would capture over rows that are not back yet.
+* A journal row written by an earlier boot is checked again under a new continuation cycle instead of
+  being trusted as done. A `restored` row only says that boot finished; it does not say a turn is
+  running now. This is why a second crash left sessions that had been reported restored sitting idle.
+* A subagent child whose parent is not live yet is retryable (`failed`) instead of terminal
+  (`attention`), so the plan keeps it and the next pass delivers it. The wait for the parent is a
+  real poll rather than a single look.
+* The child delivery passes an abort signal to `subagents.prompt`; without it every child row threw
+  `Cannot read properties of undefined (reading 'aborted')` and was reported as a failure.
+* A turn that ignores the first cancel is retried inside the grace window, and the reported cancel
+  list has one entry per session. Four sessions were being reported as "still running" after a
+  single cancel each.
+* Every restore outcome lands on a final glyph: attention and skipped rows close the plan, retryable
+  failures keep it, and a restore interrupted by the button returns to a pressable pause.
+* Tests: nothing that was only present at a crash is started or re-armed; the glyph is pause while a
+  restore is in flight; an earlier boot's journal entry is checked again with a fresh cycle; a child
+  waits for a late parent and delivers with a signal; a turn that shrugs off one cancel is stopped.
+
 ## 0.5.2
 
 Restore no longer mistakes its own timing for a failure, and a restore that cannot finish now ends

@@ -158,7 +158,7 @@ test('a restored plan stays archived and readable after the process that restore
   }
 })
 
-test('a crash found by the heartbeat is mounted only, and the heartbeat takes the file back after the restore', async () => {
+test('a crash found by the heartbeat is reported without starting its idle rows, and the heartbeat takes the file back', async () => {
   const { dir, cleanup } = tempDir()
   try {
     // First process: two turns are open, then it dies without saying anything. The heartbeat file
@@ -191,9 +191,11 @@ test('a crash found by the heartbeat is mounted only, and the heartbeat takes th
 
     const outcome = await first.resume()
     assert.equal(outcome.status, 'resumed')
-    // Both sessions are mounted only: a crash is evidence a turn was open, not permission to send.
+    // Neither session is started: a crash row only proves the session existed when the process
+    // died. Mounting it is enough to fire queued prompts, so the row is reported instead.
     const sessions = probe.calls.filter((call) => call[0] === 'session')
-    assert.deepEqual(sessions.map((call) => [call[1], call[2]]).sort(), [['s1', 'mount'], ['s2', 'mount']])
+    assert.deepEqual(sessions, [])
+    assert.deepEqual(outcome.summary.skipped, ['session s1', 'session s2'])
     assert.equal(probe.calls.some((call) => call[0] === 'stop'), false)
 
     const store = createStore(dir, { log: () => {} })
@@ -224,7 +226,7 @@ test('a crash found by the heartbeat is mounted only, and the heartbeat takes th
   }
 })
 
-test('a real v3 heartbeat record reaches the resume loop as a goal to re-arm', async () => {
+test('a real v4 heartbeat record is read by the resume loop without reviving idle work', async () => {
   const { dir, cleanup } = tempDir()
   try {
     // The dead process left one open turn and one armed goal in the file on disk.
@@ -260,11 +262,13 @@ test('a real v3 heartbeat record reaches the resume loop as a goal to re-arm', a
 
     const outcome = await engine.resume()
     assert.equal(outcome.status, 'resumed')
-    // The open turn is mounted, never re-sent; the goal is re-armed by its recorded revision and
-    // needs no extra read that would see it as already armed and give up.
-    assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => [call[1], call[2]]), [['s1', 'mount']])
-    assert.deepEqual(probe.calls.filter((call) => call[0] === 'goal'), [['goal', 'g1']])
-    assert.equal(probe.calls.some((call) => call[0] === 'prepareGoal'), false)
+    // The record proves the session and goal existed, not that either was working after the
+    // restart: the session is not started and the goal is not armed. What this case keeps guarding
+    // is that the writer and the reader agree on the file, so nothing is silently dropped.
+    assert.deepEqual(probe.calls.filter((call) => call[0] === 'session'), [])
+    assert.deepEqual(probe.calls.filter((call) => call[0] === 'goal'), [])
+    assert.deepEqual(outcome.summary.skipped, ['session s1'])
+    assert.ok(outcome.summary.attention.some((row) => /g1/u.test(row)), outcome.summary.attention.join('|'))
     live.stop()
   } finally {
     cleanup()

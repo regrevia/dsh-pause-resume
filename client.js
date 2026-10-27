@@ -151,7 +151,7 @@ window.__ModuleLoader__.load({
     }, h('path', { d: 'M5.2 3.4a.7.7 0 0 0-1.05.6v8a.7.7 0 0 0 1.05.6l6.9-4a.7.7 0 0 0 0-1.2l-6.9-4z' }))
     const SPIN_GLYPH = icon(['M8 2.5a5.5 5.5 0 1 1-4.3 2.06'], SPIN_STYLE)
 
-    /** The one sentence behind the dot, in the tooltip only: the button itself stays a glyph. */
+    /** The one sentence behind the button, in the tooltip only: the button itself stays a glyph. */
     function hintOf(state) {
       const focus = typeof state.focus === 'string' && state.focus !== '' ? state.focus : ''
       if (state.error === 'restore-partial') return focus === '' ? COPY.partial : `${COPY.partial}: ${focus}`

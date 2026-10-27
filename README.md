@@ -7,9 +7,9 @@ disk, and after a restart the same button puts that work back.
 * ▶ — work is stopped, or a previous process died mid-turn. Press to restore it.
 * ⏸ dimmed — nothing to stop and nothing to restore.
 
-The glyph is the only status. There is no counter, no panel and no toast, because a status badge next
-to the button would be a second source of truth for the same fact. A red dot is added only when the
-last press left something for a person to look at.
+The glyph is the only status. There is no counter, no panel, no badge and no toast, because a second
+indicator would be a second source of truth for the same fact. When the last press left something for
+a person to look at, the one-sentence tooltip says so and the button still offers the same glyph.
 
 ## What it restores
 
@@ -59,13 +59,16 @@ it. The previous process's record is turned into a crash plan in `pending.json` 
 file is replaced, so a second or third restart still sees the same work and offers ▶ with no press
 needed.
 
-A crash record is deliberately weaker than a press: it proves a turn was open, not whether the person
-wanted it continued. So restore mounts those sessions and lists them in the outcome; it does not
-type a continuation message on their behalf. Sessions that ended normally never enter the file.
+A crash record is deliberately weaker than a press: it proves a session existed, not that a turn was
+open after the restart. The record carries the turn number the dead process last saw; restore continues
+a row only when the live session shows the same turn. Any other row is reported as skipped and left
+alone, because mounting it can fire a queued prompt and open a turn nobody asked for. A goal whose
+session is not continued is reported as attention instead of being re-armed. Sessions that ended
+normally never enter the file.
 
 The same process reloading the plugin (hot reload) sees its own id and knows there is nothing to
 restore. A `pausing` plan found on disk means the press itself was interrupted: those sessions are
-mounted but never continued, and the button carries a dot until a person presses restore.
+left alone, and the button keeps offering the restore until a person presses it.
 
 ## Progressive restore (off by default)
 
@@ -197,5 +200,5 @@ MIT.
 ---
 
 一行说明：会话头一个按钮，⏸ 停掉正在跑的回合、目标与后台任务；重启后同一个按钮变 ▶，把上次的工作
-接回来。正常结束的会话不记录、不恢复；崩溃靠心跳文件识别，但只挂载不代发消息；日程不会被动
+接回来。正常结束的会话不记录、不恢复；崩溃只恢复回合号对得上的会话，其余不启动、目标不重挂；日程不会被动
 （该服务只有删除，没有停用），后台命令只记录不重跑。
