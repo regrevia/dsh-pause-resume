@@ -1,4 +1,4 @@
-## 0.5.6
+## 0.5.7
 
 A crashed set is restored or kept, never declared restored with nothing started. This fixes the report
 that the icon flipped to play but no session came back, and the plan was already gone so pressing again
