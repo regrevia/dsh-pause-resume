@@ -369,6 +369,19 @@ test('restoreGoal() arms the paused goal with its exact revision and refuses a c
   assert.equal(moved.calls.some((call) => call[0] === 'goals.resume'), false)
 })
 
+test('restoreGoal() stops arming when the restore is cancelled', async () => {
+  const fake = harness({
+    agents: [{ id: 's1', status: 'idle' }],
+    goals: { s1: { id: 'g1', revision: 8, phase: 'paused', activation: 'disarmed' } },
+  })
+  const probe = createProbe(fake.registry)
+  const controller = new AbortController()
+  controller.abort()
+  const outcome = await probe.restoreGoal({ sessionId: 's1', goalId: 'g1', pausedRevision: 8 }, { plan: { planId: 'p1' }, signal: controller.signal })
+  assert.equal(outcome.status, 'interrupted')
+  assert.equal(fake.calls.some((call) => call[0] === 'goals.resume'), false)
+})
+
 test('restoreSession() never continues a crash row, even when the turn was open', async () => {
   const agent = { id: 's1', status: 'idle', phase: { lastTurn: 3 } }
   const fake = harness({ agents: [agent] })

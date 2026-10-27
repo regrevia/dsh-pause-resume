@@ -4,7 +4,7 @@ One button in the DeepSeek Harness session header. It stops what is running, wri
 disk, and after a restart the same button puts that work back.
 
 * ⏸ — work is running. Press to stop it.
-* ▶ — work is stopped, or a previous process died mid-turn. Press to restore it.
+* ▶ — work is stopped, or a previous process left work to restore. Press to restore it.
 * ⏸ dimmed — nothing to stop and nothing to restore.
 
 The glyph is the only status. There is no counter, no panel, no badge and no toast, because a second

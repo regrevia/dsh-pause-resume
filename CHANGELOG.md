@@ -1,4 +1,9 @@
-## 0.5.7
+## 0.5.8
+
+- A cancelled restore now also stops before arming a goal, not only before prompting a session: pressing pause during a restore leaves the goal unarmed and the plan retryable.
+- README describes the play button by what it does, not by a guess about the last process.
+
+## 0.5.8
 
 A crashed set is restored or kept, never declared restored with nothing started. This fixes the report
 that the icon flipped to play but no session came back, and the plan was already gone so pressing again
