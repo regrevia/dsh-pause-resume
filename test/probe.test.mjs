@@ -772,3 +772,60 @@ test('stop() cancels a turn that started after the capture and returns it as dis
   assert.equal(stopped.sessions.find((row) => row.sessionId === 's2').lastTurn, 1)
   assert.deepEqual(stopped.stillRunning, [])
 })
+
+test('restoreSession keeps a cold attach that settles after its budget', async () => {
+  // A cold attach of a large session legitimately takes longer than the per-call budget. The
+  // attempt is observed to completion in a bounded grace window; only a real error is a failure.
+  const calls = []
+  const live = new Map()
+  const agent = { id: 's9', status: 'idle', phase: { lastTurn: 5 } }
+  const registry = {
+    get: (key) => ({
+      agents: { get: (id) => live.get(id), list: () => [...live.values()] },
+      sessionController: {
+        resolveAgent: async (sessionId) => {
+          calls.push(['resolveAgent', sessionId])
+          await settle(150)
+          live.set(sessionId, agent)
+          return { agent }
+        },
+        prompt: async (request) => {
+          calls.push(['prompt', request.requestId])
+          agent.status = 'running'
+          agent.phase.lastTurn = 6
+          return { accepted: true }
+        },
+      },
+    }[key]),
+  }
+  const probe = createProbe(registry, { callMs: 40, graceMs: 100 })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's9', intent: 'continue', epoch: 0, lastTurn: 5 },
+    { plan: { planId: 'p-late', sessions: [] }, budgetMs: 40 },
+  )
+  assert.equal(outcome.status, 'restored')
+  assert.equal(outcome.continued, true)
+  assert.deepEqual(calls.map((call) => call[0]), ['resolveAgent', 'prompt'])
+})
+
+test('a retried attempt sends a new request id so the prompt dedupe cannot swallow it', async () => {
+  const agent = { id: 's1', status: 'idle', phase: { lastTurn: 2 } }
+  const fake = harness({ agents: [agent] })
+  const probe = createProbe(fake.registry, { callMs: 500, graceMs: 100 })
+  const session = { sessionId: 's1', intent: 'continue', epoch: 0, lastTurn: 2, retry: 0 }
+  const plan = { planId: 'p-retry', sessions: [session] }
+  const first = await probe.restoreSession(session, { plan })
+  assert.equal(first.status, 'restored')
+  // The official prompt answers `{accepted:true}` for an id it already holds and never wakes the
+  // session, so the previous turn stands unchanged here.
+  agent.status = 'idle'
+  agent.phase.lastTurn = 2
+  session.retry = 1
+  const second = await probe.restoreSession(session, { plan })
+  assert.equal(second.status, 'restored')
+  const ids = fake.calls.filter((call) => call[0] === 'prompt').map((call) => call[2])
+  assert.equal(ids.length, 2)
+  assert.equal(ids[0], 'p-retry:continue:s1')
+  assert.equal(ids[1], 'p-retry:continue:s1.r1')
+  assert.notEqual(ids[0], ids[1])
+})

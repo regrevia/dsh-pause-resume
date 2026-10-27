@@ -97,10 +97,10 @@ function fakeProbe(live = { sessions: [], goals: [], jobs: [], readable: true },
   }
 }
 
-function engineFor({ store, probe, heartbeat = null, now = () => 1700000000000 } = {}) {
+function engineFor({ store, probe, heartbeat = null, now = () => 1700000000000, bootId = 'boot-1', maxRestoreAttempts } = {}) {
   const s = store ?? fakeStore()
   const p = probe ?? fakeProbe()
-  return { store: s, probe: p, engine: createEngine({ store: s, probe: p, heartbeat, now, bootId: 'boot-1', log: () => {} }) }
+  return { store: s, probe: p, engine: createEngine({ store: s, probe: p, heartbeat, now, bootId, maxRestoreAttempts, log: () => {} }) }
 }
 
 test('describe() is idle and offers nothing when there is no work and no plan', () => {
@@ -305,9 +305,10 @@ test('resume() keeps the plan and retries only the item that failed', async () =
   const probeCallsBefore = probe.calls.length
   const second = await engine.resume()
   assert.equal(second.status, 'resumed')
-  // The live Harness decides what still needs work, not an old journal: every item is checked
-  // again, and the already-restored ones answer "skipped" from their own state.
-  assert.deepEqual(probe.calls.slice(probeCallsBefore).map((call) => call[0]), ['session', 'session', 'prepareGoal', 'goal'])
+  // A session this plan already restored is not probed again: a restarted Harness can advance its
+  // turn on its own, and rechecking that is what used to relabel finished work as attention.
+  // Only the row that failed is checked again; the one already restored keeps its result.
+  assert.deepEqual(probe.calls.slice(probeCallsBefore).map((call) => [call[0], call[1]]), [['session', 's1'], ['prepareGoal', 'g1'], ['goal', 'g1']])
   assert.equal(store.state.consumed.plan.planId, 'p1')
 })
 
@@ -443,14 +444,14 @@ test('a crash in the middle of a restore keeps the plan and checks every item ag
   }
   const store = fakeStore({ plan: null })
   store.state.pending = pending
-  // The previous process journaled s1 before it died: that row must not silence it now, because a
-  // journal is evidence of an attempt, not of a live session.
+  // The previous process restored s1 and then died. That row is finished work: it must not be
+  // probed again (a second continuation would duplicate it), while s2 has no evidence and is.
   store.state.journal.set('s:s1', { status: 'restored', boot: 'b1' })
   let fail = true
   const probe = fakeProbe()
   probe.restoreSession = async (session) => {
     probe.calls.push(['session', session.sessionId, session.running])
-    if (session.sessionId === 's1' && fail === true) return { status: 'failed', detail: 'session not ready' }
+    if (session.sessionId === 's2' && fail === true) return { status: 'failed', detail: 'session not ready' }
     return { status: 'restored', detail: 'attached' }
   }
   const { engine } = engineFor({ store, probe })
@@ -459,10 +460,11 @@ test('a crash in the middle of a restore keeps the plan and checks every item ag
   assert.equal(partial.status, 'partial')
   assert.equal(store.state.pending.planId, 'crash-9-2')
   assert.equal(engine.describe().error, 'restore-partial')
+  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => call[1]), ['s2'])
   fail = false
   const retry = await engine.resume()
   assert.equal(retry.status, 'resumed')
-  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').slice(-2).map((call) => call[1]), ['s1', 's2'])
+  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => call[1]), ['s2', 's2'])
   assert.equal(store.state.pending, null)
 })
 
@@ -1302,4 +1304,65 @@ test('a progressive restore reports itself as active while the batch runs', asyn
   await running
   assert.equal(gate.guarded, 1)
   assert.equal(gate.unguarded, 1)
+})
+
+test('a session restored in an earlier boot is never downgraded by a later one', async () => {
+  // This is the shape of the stuck plan: boot 1 restored the session, boot 2 saw a turn DSH itself
+  // had advanced and journaled `attention`, and the plan could never be recognised as complete.
+  const plan = {
+    version: 3, planId: 'pause-9', source: 'pause', status: 'paused',
+    sessions: [{ sessionId: 's1', intent: 'continue', epoch: 1, running: true, lastTurn: 2 }], goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  store.state.journal.set('s:s1', { status: 'restored', boot: 'boot-0' })
+  const probe = fakeProbe()
+  probe.restoreSession = async () => {
+    probe.calls.push(['session', 's1'])
+    throw new Error('a restored row must not be probed again')
+  }
+  // consume() clears the journal, so keep what it held before the plan closes.
+  const journalAtClose = []
+  const baseConsume = store.consume
+  store.consume = (next, summary) => {
+    for (const [key, row] of store.state.journal) journalAtClose.push([key, row])
+    return baseConsume(next, summary)
+  }
+  const { engine } = engineFor({ store, probe })
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.deepEqual(probe.calls, [])
+  assert.equal(store.state.consumed.summary.attention.length, 0)
+  assert.deepEqual(store.state.consumed.summary.restored, ['session s1'])
+  // Journaled for this boot as well, so the journal and the live answer agree.
+  assert.equal(journalAtClose.find(([key]) => key === 's:s1')[1].boot, 'boot-1')
+  assert.equal(engine.describe().phase, 'idle')
+})
+
+test('a plan that never comes back closes as attention instead of staying unfinished forever', async () => {
+  const plan = {
+    version: 3, planId: 'pause-10', source: 'pause', status: 'paused',
+    sessions: [{ sessionId: 's1', intent: 'continue', epoch: 0, running: true, lastTurn: 1 }], goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe()
+  probe.restoreSession = async () => {
+    probe.calls.push(['session', 's1'])
+    return { status: 'failed', detail: 'resume timed out' }
+  }
+  const { engine } = engineFor({ store, probe, maxRestoreAttempts: 3 })
+  const first = await engine.resume()
+  assert.equal(first.status, 'partial')
+  assert.equal((await engine.resume()).status, 'partial')
+  const last = await engine.resume()
+  // Out of attempts: attention is terminal, so the plan closes with the failure still reported.
+  assert.equal(last.status, 'resumed')
+  assert.notEqual(store.state.consumed, null)
+  assert.deepEqual(store.state.consumed.plan.restore.gaveUp, ['session s1: resume timed out'])
+  assert.match(store.state.consumed.summary.attention.join(' '), /resume timed out/u)
+  const state = engine.describe()
+  assert.equal(state.phase, 'idle')
+  assert.equal(state.action, 'none')
+  assert.equal(state.outstanding, 0)
+  assert.equal(state.attention, 1)
+  assert.match(state.result.attention.join(' '), /resume timed out/u)
 })

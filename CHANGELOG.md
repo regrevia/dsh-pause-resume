@@ -1,3 +1,31 @@
+## 0.5.2
+
+Restore no longer mistakes its own timing for a failure, and a restore that cannot finish now ends
+instead of pinning the button forever. Both were visible in a real paused set of sixteen sessions:
+ten of sixteen were reported as "resume timed out" while their turns were in fact continuing, and the
+plan stayed paused for hours because two rows kept failing on every boot.
+
+* A restore attempt that overruns its budget is observed a little longer before it is called a
+  failure, and a late success counts as success. The budget also grows with the size of the paused
+  set, so a cold attach of many sessions is not judged by a single-session deadline. Only a real
+  error from the Harness is reported as a failure.
+* A session this plan already restored stays restored. A restarted Harness can revive a session and
+  advance its turn by itself; probing it again used to relabel finished work as `attention`, which is
+  why a complete restore could never be recognised as complete. The earlier result is kept and
+  journaled for the current boot.
+* Goals are still checked on every attempt. A goal row can carry an intent that has not been armed
+  yet, and skipping it would silently drop that restore.
+* A retried session attempt sends a new request id, so the official prompt deduplication cannot
+  accept the message and leave the session asleep. The retry count is persisted with the plan.
+* A plan whose rows keep failing now closes after three attempts: those rows become `attention`,
+  which is terminal. The plan is archived, the button returns to idle and the details stay in
+  `/state`, so a permanently broken session cannot trap the plugin in paused.
+* `cleanup()` aborts queued restore permits and the plugin exports its gate, so a reload cannot leave
+  waiters behind on an instance that no longer exists.
+* Tests: a session restored in an earlier boot is not downgraded by a later one; a cold attach that
+  settles after its budget is reconciled as restored; a retried attempt sends a distinct request id;
+  a plan that never comes back closes as attention with nothing outstanding.
+
 ## 0.5.1
 
 Progressive restore is now opt-in, off by default. For most people the ordinary restore path is

@@ -149,6 +149,10 @@ machine; local-only is the default.
   operation that waits.
 * **Durable before destructive.** No turn is cancelled until the plan is on disk. A failed write means
   nothing was stopped.
+* **Bounded.** A restore that keeps failing closes after three attempts and reports those rows as
+  attention instead of staying paused indefinitely. An attempt that overruns its budget is watched a
+  little longer before it is called a failure, and a session this plan already restored stays
+  restored even if the Harness revives it and moves its turn on a later boot.
 * **Idempotent.** The continuation request id is derived from the plan and the session, so a retry
   cannot post the same message twice; a turn that already moved is not continued again.
 * **Honest.** Unreadable state never reports `paused`. A session deleted by hand, a goal changed by

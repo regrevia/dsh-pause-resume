@@ -263,6 +263,7 @@ export function apply(ctx, config = {}) {
     gate,
     progressive,
     startGapMs: progressive && Number.isFinite(config?.restoreStartGapMs) ? config.restoreStartGapMs : 3000,
+    maxRestoreAttempts: Number.isSafeInteger(config?.restoreMaxAttempts) && config.restoreMaxAttempts > 0 ? config.restoreMaxAttempts : 3,
     log,
   })
   engineRef = engine
@@ -279,6 +280,13 @@ export function apply(ctx, config = {}) {
     }
     // The in-flight press, if any, checks this and refuses to write its stale result.
     dropEpoch(epoch)
+    // A pending restore must not keep waiting on a permit nobody will release: the instance is gone,
+    // so its queued rows are abandoned here instead of pinning the new instance's button as busy.
+    try {
+      gate.abort()
+    } catch {
+      /* the gate may already be disposed */
+    }
     try {
       disposeRoutes()
     } catch {}
@@ -414,5 +422,5 @@ export function apply(ctx, config = {}) {
     }
   })()
 
-  return { store, engine, heartbeat }
+  return { store, engine, heartbeat, gate }
 }
