@@ -402,6 +402,44 @@ test('an interrupted pause is mounted but never continued', async () => {
   assert.equal(store.state.consumed.plan.source, 'interrupted')
 })
 
+test('hydrate() re-derives crash rows a build without live turns wrote as mount-only', async () => {
+  // What the shipped 0.5.3 build left behind: every row mount-only, no turn, although the residue
+  // still proves the turn was open. Spending a press on those mounts would attach sessions and
+  // consume the plan without continuing any work.
+  const legacy = {
+    version: 2,
+    planId: 'crash-1700-1',
+    status: 'paused',
+    source: 'crash',
+    createdAt: '1970-01-01T00:00:00.000Z',
+    sessions: [{ sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true, retry: 2 }],
+    goals: [{ sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: 4, crash: true }],
+    jobs: [],
+  }
+  const store = fakeStore()
+  store.state.pending = legacy
+  const probe = fakeProbe()
+  probe.crashPlan = (residue, options) => ({
+    version: 3,
+    planId: options.planId,
+    status: 'paused',
+    source: 'crash',
+    createdAt: '1970-01-01T00:00:00.000Z',
+    sessions: [{ sessionId: 's1', intent: 'continue', epoch: 0, running: true, lastTurn: 7, crash: true }],
+    goals: [{ sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: 4, crash: true }],
+    jobs: [],
+    attention: [],
+    crashes: 1,
+  })
+  const engine = createEngine({ store, probe, bootId: 'b1', now: () => 2, log: () => {} })
+  await engine.hydrate({ residue: { at: 1700, sessions: [{ sessionId: 's1', lastTurn: 7 }] } })
+  assert.equal(store.state.pending.planId, 'crash-1700-1')
+  assert.equal(store.state.pending.sessions[0].intent, 'continue')
+  assert.equal(store.state.pending.sessions[0].lastTurn, 7)
+  assert.equal(store.state.pending.sessions[0].retry, 2)
+  assert.equal(store.state.pending.goals[0].armedRevision, 4)
+})
+
 test('hydrate() takes the phase from the disk, not from a fresh boot', async () => {
   const empty = engineFor({}).engine
   await empty.hydrate()

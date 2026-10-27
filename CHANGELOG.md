@@ -1,3 +1,8 @@
+## 0.5.9
+
+- A crash plan written by a build that could not read live turns (every row mount-only) is re-derived at the next boot from the residue that is readable now. The press then continues the open turns instead of only attaching them; a pause plan is never rewritten.
+- Crash-plan upgrades keep per-row retry counts and the goal revisions the old plan recorded.
+
 ## 0.5.8
 
 - A cancelled restore now also stops before arming a goal, not only before prompting a session: pressing pause during a restore leaves the goal unarmed and the plan retryable.
