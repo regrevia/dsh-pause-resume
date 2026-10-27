@@ -1,8 +1,9 @@
-## 0.5.4
+## 0.5.6
 
 A crashed set is restored or kept, never declared restored with nothing started. This fixes the report
 that the icon flipped to play but no session came back, and the plan was already gone so pressing again
-did nothing.
+did nothing. Versions 0.5.4 and 0.5.5 on npm were built from an intermediate state that still skipped
+crashed rows; they are deprecated, and this release is the fixed build.
 
 * Crash rows are no longer skipped before the probe sees them. Every recorded session is attached and
   read; the probe decides continue, idle or unknown from the live turn, instead of the engine deciding
