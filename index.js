@@ -240,6 +240,8 @@ export function apply(ctx, config = {}) {
     continueText: typeof config?.continueText === 'string' ? config.continueText : undefined,
   })
   const epoch = nextEpoch()
+  /** Progressive restore is an opt-in capacity measure, not part of the pause guarantee. */
+  const progressive = config?.restoreProgressive === true
   /**
    * Progressive restore: the gate is what actually limits provider requests. The restore loop can
    * only limit dispatch, and a session counts as started as soon as its turn opens — the upstream
@@ -259,7 +261,8 @@ export function apply(ctx, config = {}) {
     bootId: bootId(),
     graceMs: Number.isFinite(config?.graceMs) ? config.graceMs : 2000,
     gate,
-    startGapMs: Number.isFinite(config?.restoreStartGapMs) ? config.restoreStartGapMs : 3000,
+    progressive,
+    startGapMs: progressive && Number.isFinite(config?.restoreStartGapMs) ? config.restoreStartGapMs : 3000,
     log,
   })
   engineRef = engine
@@ -288,7 +291,9 @@ export function apply(ctx, config = {}) {
    * first token would let six sessions pile six upstream requests onto the gateway while each is
    * still waiting for its answer. A terminal finish chunk is the only proof a request is over.
    */
-  if (typeof ctx.on === 'function') {
+  // Off is the default: no listener, no queue and no timer is installed, so a plain restore keeps
+  // exactly the request path it had before this feature existed.
+  if (progressive === true && typeof ctx.on === 'function') {
     try {
       const off = ctx.on('llm/stream', (options, next) => {
         if (gate.enabled() === false) return next()

@@ -1,3 +1,21 @@
+## 0.5.1
+
+Progressive restore is now opt-in, off by default. For most people the ordinary restore path is
+already healthy, and staging it only adds waiting; the extra capacity control belongs to the
+environments that need it.
+
+* New `restoreProgressive` setting (default `false`). When off, the plugin installs no `llm/stream`
+  middleware, no request queue and no cooldown timer, applies no start spacing, and restores exactly
+  as before. When on, the 0.5.0 behaviour applies unchanged.
+* The switch is read at the moment restore starts and the batch keeps that setting; flipping it
+  mid-restore does not release queued requests. Use pause to stop the current batch.
+* Everything else is unaffected by the switch: pause and restore of sessions, subagents and jobs,
+  pausing during a restore, plan persistence, crash recovery, continuation deduplication and the
+  retry entry.
+* `restore` in `/state` now reports `progressive` and `active` alongside the pool counters.
+* Tests: the plain path never touches the gate and applies no spacing; a progressive batch reports
+  itself as active and guards/releases exactly once.
+
 ## 0.5.0
 
 Restoring six long sessions at once also started six upstream model streams at once. The restore

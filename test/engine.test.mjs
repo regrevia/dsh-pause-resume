@@ -1219,7 +1219,7 @@ test('pause() interrupts a running restore, keeps the plan and stops only what s
     if (session.sessionId === 's1') await new Promise((resolve) => { release = resolve })
     return { status: 'restored', detail: 'attached' }
   }
-  const engine = createEngine({ store, probe, now: () => 1700000000000, bootId: 'boot-1', gate, log: () => {} })
+  const engine = createEngine({ store, probe, now: () => 1700000000000, bootId: 'boot-1', gate, progressive: true, log: () => {} })
   const running = engine.resume()
   while (release === null) await new Promise((resolve) => setTimeout(resolve, 0))
   assert.equal(engine.phase, 'resuming')
@@ -1240,5 +1240,66 @@ test('pause() interrupts a running restore, keeps the plan and stops only what s
   assert.equal(settled.status, 'interrupted')
   assert.equal(store.state.consumed, null, 'an interrupted restore never consumes the plan')
   assert.equal(probe.calls.filter((call) => call[0] === 'session' && call[1] === 's2').length, 0, 'no dispatch after the interrupt')
+  assert.equal(gate.unguarded, 1)
+})
+
+test('a non-progressive restore leaves the gate closed and ignores the start gap', async () => {
+  const plan = {
+    version: 3, planId: 'p10', source: 'pause', status: 'paused',
+    sessions: [{ sessionId: 's1', running: true, lastTurn: 1 }, { sessionId: 's2', running: true, lastTurn: 1 }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe()
+  const gate = {
+    guarded: 0, unguarded: 0, aborted: 0,
+    guard() { this.guarded += 1 },
+    unguard() { this.unguarded += 1 },
+    abort() { this.aborted += 1 },
+    stats() { return { capacity: 1, running: 0, queued: 0 } },
+  }
+  const engine = createEngine({
+    store, probe, bootId: 'boot-1', gate, progressive: false, startGapMs: 5000, log: () => {},
+  })
+  assert.equal(engine.describe().restore.progressive, false)
+  assert.equal(engine.describe().restore.active, false, 'no batch is running yet')
+  const startedAt = Date.now()
+  const outcome = await engine.resume()
+  const elapsed = Date.now() - startedAt
+  assert.equal(outcome.status, 'resumed')
+  assert.equal(gate.guarded, 0, 'the optional capacity feature must not touch the request path')
+  assert.equal(gate.unguarded, 0)
+  assert.ok(elapsed < 1000, 'no batch spacing is applied when the feature is off')
+})
+
+test('a progressive restore reports itself as active while the batch runs', async () => {
+  const plan = {
+    version: 3, planId: 'p11', source: 'crash', status: 'paused',
+    sessions: [{ sessionId: 's1', running: false, lastTurn: 1 }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe()
+  const gate = {
+    guarded: 0, unguarded: 0, aborted: 0,
+    guard() { this.guarded += 1 },
+    unguard() { this.unguarded += 1 },
+    abort() { this.aborted += 1 },
+    stats() { return { capacity: 1, running: 0, queued: 0 } },
+  }
+  let release = null
+  probe.restoreSession = async (session) => {
+    probe.calls.push(['session', session.sessionId])
+    await new Promise((resolve) => { release = resolve })
+    return { status: 'restored', detail: 'attached' }
+  }
+  const engine = createEngine({ store, probe, bootId: 'boot-1', gate, progressive: true, log: () => {} })
+  const running = engine.resume()
+  while (release === null) await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(engine.describe().restore.progressive, true)
+  assert.equal(engine.describe().restore.active, true, 'the batch keeps the setting it started with')
+  release()
+  await running
+  assert.equal(gate.guarded, 1)
   assert.equal(gate.unguarded, 1)
 })

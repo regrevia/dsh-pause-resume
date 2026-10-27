@@ -67,11 +67,19 @@ The same process reloading the plugin (hot reload) sees its own id and knows the
 restore. A `pausing` plan found on disk means the press itself was interrupted: those sessions are
 mounted but never continued, and the button carries a dot until a person presses restore.
 
-## Progressive restore
+## Progressive restore (off by default)
 
 Six long sessions restored at once are six upstream model requests at once, and a gateway that is
-happy with one slow stream is often unhappy with six. Restore is therefore staged by default. Two
-layers, because either alone is enough to defeat the other:
+happy with one slow stream is often unhappy with six. For Direct API users this is usually fine and
+the extra waiting is pure cost, so progressive restore is **off by default**: restore follows the
+ordinary path with no added spacing, no request pool and no cooldown timer installed at all.
+
+Turn it on when batch restores run into rate limits or timeouts: a shared account or gateway quota,
+a self-hosted proxy with limited capacity, or an environment where restoring several sessions at
+once is what triggers the failures. Single-session timeouts are not helped by it; those need
+investigation of the request and the upstream.
+
+Two layers, because either alone is enough to defeat the other:
 
 * **Dispatch spacing.** Sessions are restored in waves by lineage depth, with a gap of
   `restoreStartGapMs` (3 s) plus up to 0.4 s jitter between starts.
@@ -87,19 +95,31 @@ The pool starts at `restoreCapacity` (1). Two clean streams in a row raise it by
 `restoreCooldownMs` (40 s), so one unwell upstream cannot be hammered by a queue of sessions. An
 abandoned stream (the person paused) is neither a success nor a strike: cancelling is cheap.
 
+The switch is read when you press restore; a running batch keeps the setting it started with, so
+turning the feature off mid-batch cannot suddenly release the queue. Press pause to stop the
+current batch.
+
+Nothing about reliability depends on this switch. Pause and restore of sessions, subagents and
+background jobs, pausing again during a restore, plan persistence, crash recovery, continuation
+deduplication and the retry entry all still apply with progressive restore off. The restore loop
+keeps its own small worker waves either way; only the extra limit on real model requests is
+optional.
+
 Pausing while a restore is running is immediate. The press stops dispatching, refuses every request
 still waiting for a permit, asks the Harness to stop the work that already started, writes what is
 left back to the plan as an outstanding continuation, and returns `paused` with
 `interrupted: true`. The next press resumes the same plan; the continuation request id is per cycle,
 so a message already admitted is deduplicated instead of sent twice.
 
-`/state` reports the queue while a plan exists: `{enabled, capacity, running, queued, dispatched,
-failed, interrupted, cooldownUntil}` under `restore`. The button itself stays icon-only.
+`/state` reports the setting and the queue while a plan exists: `{progressive, active, enabled,
+capacity, running, queued, dispatched, failed, interrupted, cooldownUntil}` under `restore`. The
+button itself stays icon-only.
 
 Configuration (all optional):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
+| `restoreProgressive` | `false` | opt-in staged restore; off keeps the plain path |
 | `restoreCapacity` | `1` | model requests allowed when a restore starts |
 | `restoreMaxCapacity` | `2` | ceiling the health gate may raise the limit to |
 | `restoreCooldownMs` | `40000` | pause after two consecutive failures across sessions |
