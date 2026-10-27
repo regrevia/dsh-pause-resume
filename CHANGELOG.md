@@ -1,3 +1,21 @@
+## 0.4.12
+
+A crash record answered the state question with a flag that described a stop which never
+happened. `complete` is documented as "the stop finished and nothing is still turning", but a
+record written by the heartbeat after a process died also has `status: paused`, so the API said
+`complete: true` for it. The page does not read the flag; anything else that does would be told
+a press had finished successfully when the process had simply gone away.
+
+* `complete` is now `null` for a plan whose source is `crash`, the same answer given when no
+  plan exists. A crash plan converted into a real pause by the next press still reports `true`,
+  because that stop did run.
+* New integration coverage drives the real heartbeat file across two simulated processes: a
+  residue is offered as a crash plan, resuming it mounts both sessions and sends no
+  continuation, the pending copy is cleared afterwards, and the released heartbeat takes the
+  file back so a third process sees no phantom crash.
+* A regression test for the repair path: a pause pressed after a failed merge writes the merged
+  plan durably and hands the held heartbeat back exactly once.
+
 # Changelog
 
 ## 0.4.11

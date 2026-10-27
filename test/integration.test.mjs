@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createStore } from '../lib/snapshot.js'
 import { createEngine } from '../lib/engine.js'
+import { createHeartbeat } from '../lib/heartbeat.js'
 
 // The store is the only thing that survives a process here: these tests run the real atomic writer
 // against a temp directory, so a plan field the writer drops or a file the reader misses fails a
@@ -151,6 +152,72 @@ test('a restored plan stays archived and readable after the process that restore
     assert.equal(state.action, 'none')
     assert.equal(state.result.planId !== undefined, true)
     assert.equal(state.counts.sessions, 0)
+  } finally {
+    cleanup()
+  }
+})
+
+test('a crash found by the heartbeat is mounted only, and the heartbeat takes the file back after the restore', async () => {
+  const { dir, cleanup } = tempDir()
+  try {
+    // First process: two turns are open, then it dies without saying anything. The heartbeat file
+    // it leaves behind is the only evidence the next boot has.
+    const before = createHeartbeat({
+      dir, bootId: 'boot-1', intervalMs: 20,
+      listRunning: () => ['s1', 's2'], log: () => {},
+    })
+    before.start()
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    before.stop()
+
+    const probe = harness()
+    const later = createHeartbeat({ dir, bootId: 'boot-2', intervalMs: 20, listRunning: () => [], log: () => {} })
+    const first = createEngine({
+      store: createStore(dir, { log: () => {} }), probe, now: () => 1700000000000, bootId: 'boot-2',
+      heartbeat: later, log: () => {},
+    })
+    // The real plugin reads the residue before starting its own heartbeat, because starting is what
+    // overwrites the file.
+    const hydrated = await first.hydrate({ residue: later.peek() })
+    assert.equal(hydrated.durable, true)
+    assert.equal(hydrated.phase, 'idle')
+    const state = first.describe()
+    assert.equal(state.source, 'crash')
+    assert.equal(state.action, 'resume')
+    assert.equal(state.counts.sessions, 2)
+    // A crash record is not a finished stop, so the flag must not claim one.
+    assert.equal(first.describe().complete, null)
+
+    const outcome = await first.resume()
+    assert.equal(outcome.status, 'resumed')
+    // Both sessions are mounted only: a crash is evidence a turn was open, not permission to send.
+    const sessions = probe.calls.filter((call) => call[0] === 'session')
+    assert.deepEqual(sessions.map((call) => [call[1], call[2]]).sort(), [['s1', 'mount'], ['s2', 'mount']])
+    assert.equal(probe.calls.some((call) => call[0] === 'stop'), false)
+
+    const store = createStore(dir, { log: () => {} })
+    // A crash plan lives in pending.json, so finishing it clears that file and leaves a restore
+    // report; nothing was ever archived because no pause had been written.
+    assert.equal(store.hasPending(), false)
+    assert.equal(store.hasSnapshot(), false)
+    const report = store.lastRestore()
+    assert.equal(report.source, 'crash')
+    assert.equal(report.status, 'restored')
+    assert.equal(report.summary.failed.length, 0)
+
+    // The next process must not see the same crash again: once the plan is gone, the heartbeat owns
+    // the file and describes this boot, not the dead one.
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    const residue = JSON.parse(fs.readFileSync(join(dir, 'running.json'), 'utf8'))
+    assert.deepEqual(residue.sessions, [])
+    const second = createEngine({
+      store, probe, now: () => 1700000000000, bootId: 'boot-3',
+      heartbeat: createHeartbeat({ dir, bootId: 'boot-3', intervalMs: 20, listRunning: () => [], log: () => {} }),
+      log: () => {},
+    })
+    const again = await second.hydrate()
+    assert.equal(again.phase, 'idle')
+    assert.equal(second.describe().source, null)
   } finally {
     cleanup()
   }

@@ -775,6 +775,37 @@ test('a crash record merged into a pause plan survives a failed merge write', as
   assert.equal(store.state.plan, null)
 })
 
+test('a pause that repairs a failed merge hands the heartbeat back once its plan is durable', async () => {
+  // A failed merge holds the heartbeat so the old residue file is not overwritten. If the next
+  // press makes the complete plan durable, nothing may keep that hold: a heartbeat frozen for the
+  // rest of the process would describe work from before the restart on the next boot.
+  const plan = {
+    version: 3, planId: 'pause-hold-1', status: 'paused', source: 'pause',
+    sessions: [{ sessionId: 's1', intent: 'continue', epoch: 1, running: true, lastTurn: 1 }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan, failWrite: true })
+  const held = { count: 0, released: 0, hold() { this.count += 1 }, release() { this.released += 1 } }
+  const live = { readable: true, sessions: [{ sessionId: 's1', running: true, lastTurn: 2 }], goals: [], jobs: [] }
+  const probe = fakeProbe(live)
+  probe.crashPlan = (residue, options) => ({
+    version: 3, planId: options.planId, source: 'crash', status: 'paused',
+    sessions: residue.sessions.map((row) => ({ sessionId: row.sessionId, intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true })),
+    goals: [], jobs: [], attention: [],
+  })
+  const { engine } = engineFor({ store, probe, heartbeat: held })
+  const hydrated = await engine.hydrate({ residue: { sessions: [{ sessionId: 's2' }], at: 2 } })
+  assert.equal(hydrated.durable, false)
+  assert.equal(held.count, 1)
+
+  store.state.failWrite = false
+  const outcome = await engine.pause()
+  assert.equal(outcome.status, 'paused')
+  assert.equal(held.released, 1)
+  // The repaired plan is on disk, so a later process restores the merged sessions, not just s1.
+  assert.deepEqual(store.state.plan.sessions.map((row) => row.sessionId).sort(), ['s1', 's2'])
+})
+
 test('a resume that could not checkpoint a goal keeps the restore intent for the next boot', async () => {
   const plan = {
     version: 3, planId: 'pause-2', status: 'paused', source: 'pause',
