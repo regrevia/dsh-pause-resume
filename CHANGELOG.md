@@ -1,3 +1,24 @@
+## 0.4.14
+
+A pause symbol shown after an unclean exit promised work that the crash record did not keep.
+`running.json` stored session ids only, so a goal armed between rounds was invisible to the next
+process; the crash plan then mounted what it could, reported a clean restore, and left the goal
+paused. The page showed a pause glyph over an idle Host, and the press read as "cannot pause".
+
+* `running.json` is version 3 and records armed goals next to the open turns:
+  `{sessionId, goalId, revision}` per row, deduplicated and sorted.
+* A crash plan carries those rows with `armedRevision`, the proof of ownership the restore needs.
+  `armedRevision` is read back from the file, never inferred, and a row whose revision is not a
+  safe integer or whose ids are empty is dropped instead of guessed.
+* Goals alone are residue: a crash that hit between rounds still produces a plan, so the next
+  round is not lost just because no turn happened to be open.
+* A crash plan from an earlier pause is merged into the pending plan; goal rows the pause plan
+  already owns stay authoritative, and the crash fills only the gaps.
+* Jobs are still never replayed. The crash report keeps saying so instead of claiming they resumed.
+* Version 2 heartbeat files are still read; their goal list is empty, exactly as before.
+* New coverage: the v3 write/read round trip, malformed goal rows, a legacy array lister, a
+  goals-only residue, the hydrate merge, and a goals-only resume that re-arms without a session.
+
 ## 0.4.13
 
 Every answer from `/state`, `/pause` and `/resume` carried `version: '0.4.9'`. The literal was

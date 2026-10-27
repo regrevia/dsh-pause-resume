@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createProbe, listRunning } from '../lib/probe.js'
+import { createProbe, listResidue, listRunning } from '../lib/probe.js'
 
 function registry(services) {
   return { get: (key) => services[key] }
@@ -370,8 +370,92 @@ test('crashPlan() mounts what a dead process was running but never continues it'
     { sessionId: 's2', intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true },
   ])
   assert.deepEqual(plan.goals, [])
+  assert.deepEqual(plan.attention, [{ kind: 'session', id: '', detail: 'crashed before it could be paused: sessions are reattached, their turns are not re-sent' }])
+  assert.equal(plan.crashes, 2)
   assert.equal(probe.crashPlan(null), null)
   assert.equal(probe.crashPlan({ sessions: [] }), null)
+})
+
+test('crashPlan() carries armed goals over without faking a pause', () => {
+  const probe = createProbe(registry({}))
+  const plan = probe.crashPlan(
+    {
+      sessions: [{ sessionId: 's1' }],
+      goals: [{ sessionId: 's1', goalId: 'g1', revision: 4 }, { sessionId: 's2', goalId: 'g2', revision: 9 }],
+      at: 1700000000000,
+    },
+    { planId: 'crash-2' },
+  )
+  assert.deepEqual(plan.goals, [
+    { sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: 4 },
+    { sessionId: 's2', goalId: 'g2', revision: 9, armedRevision: 9 },
+  ])
+  // The goal row survives even when its session was not running between rounds.
+  assert.equal(plan.sessions.length, 1)
+  assert.equal(plan.crashes, 1)
+
+  // Goals alone are still work worth restoring: no plan would lose the next round silently.
+  const goalsOnly = probe.crashPlan({ sessions: [], goals: [{ sessionId: 's2', goalId: 'g2', revision: 9 }] }, { planId: 'crash-3' })
+  assert.equal(goalsOnly !== null, true)
+  assert.deepEqual(goalsOnly.sessions, [])
+  assert.deepEqual(goalsOnly.goals, [{ sessionId: 's2', goalId: 'g2', revision: 9, armedRevision: 9 }])
+  assert.deepEqual(goalsOnly.attention, [])
+})
+
+test('crashPlan() drops goal rows that cannot be proven instead of guessing a revision', () => {
+  const probe = createProbe(registry({}))
+  const plan = probe.crashPlan(
+    {
+      sessions: [{ sessionId: 's1' }],
+      goals: [
+        { sessionId: 's1', goalId: 'g1', revision: 4 },
+        { sessionId: 's1', goalId: 'g2' },
+        { sessionId: '', goalId: 'g3', revision: 4 },
+      ],
+    },
+    { planId: 'crash-4' },
+  )
+  assert.deepEqual(plan.goals, [{ sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: 4 }])
+})
+
+test('listResidue() records the open turns and the armed goals, and nothing else', () => {
+  const running = { id: 'a', status: 'running', phase: { lastTurn: 1 } }
+  const idle = { id: 'b', status: 'idle', phase: { lastTurn: 2 } }
+  const fake = harness({
+    agents: [running, idle],
+    goals: {
+      a: { id: 'ga', revision: 3, phase: 'active', activation: 'armed' },
+      b: { id: 'gb', revision: 8, phase: 'active', activation: 'armed' },
+    },
+  })
+  assert.deepEqual(listResidue(fake.registry), {
+    sessions: ['a'],
+    goals: [
+      { sessionId: 'a', goalId: 'ga', revision: 3 },
+      { sessionId: 'b', goalId: 'gb', revision: 8 },
+    ],
+  })
+  assert.deepEqual(listResidue(registry({})), { sessions: [], goals: [] })
+})
+
+test('listResidue() skips paused, disarmed and unreadable goals', () => {
+  const paused = { id: 'a', status: 'idle', phase: { lastTurn: 0 } }
+  const disarmed = { id: 'b', status: 'idle', phase: { lastTurn: 0 } }
+  const unreadable = { id: 'c', status: 'idle', phase: { lastTurn: 0 } }
+  const fake = harness({
+    agents: [paused, disarmed, unreadable],
+    goals: {
+      a: { id: 'ga', revision: 1, phase: 'paused', activation: 'disarmed' },
+      b: { id: 'gb', revision: 2, phase: 'active', activation: 'disarmed' },
+      c: { id: 'gc', revision: 3, phase: 'active', activation: 'armed' },
+    },
+  })
+  const original = fake.services.goals.get
+  fake.services.goals.get = (agent) => {
+    if (agent?.id === 'c') throw new Error('GOAL_READ_FAILED')
+    return original(agent)
+  }
+  assert.deepEqual(listResidue(fake.registry), { sessions: [], goals: [] })
 })
 
 test('listRunning() names exactly the sessions whose turn is open', () => {

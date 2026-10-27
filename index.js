@@ -5,7 +5,7 @@ import { createStore } from './lib/snapshot.js'
 import { createEngine } from './lib/engine.js'
 import { nextEpoch, currentEpoch, dropEpoch } from './lib/epoch.js'
 import { createHeartbeat } from './lib/heartbeat.js'
-import { createProbe, listRunning } from './lib/probe.js'
+import { createProbe, listResidue } from './lib/probe.js'
 
 export const name = 'dsh-pause-resume'
 
@@ -226,7 +226,7 @@ export function apply(ctx, config = {}) {
     dir,
     bootId: bootId(),
     intervalMs: Number.isFinite(config?.intervalMs) ? config.intervalMs : 5000,
-    listRunning: () => listRunning(ctx),
+    listRunning: () => listResidue(ctx),
     log,
   })
   const probe = createProbe(ctx, {
@@ -267,7 +267,7 @@ export function apply(ctx, config = {}) {
   const noteRunning = () => {
     if (disposed) return
     try {
-      heartbeat.note(listRunning(ctx))
+      heartbeat.note(listResidue(ctx))
     } catch (error) {
       log(`cannot note running work: ${error?.message ?? error}`)
     }

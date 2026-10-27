@@ -530,8 +530,60 @@ test('a crash residue is merged into the pending plan instead of being hidden by
   assert.deepEqual(store.state.plan.attention, [{ kind: 'session', id: 's2', detail: 'crashed: mounted only' }])
 })
 
-test('a crash residue that cannot be stored keeps the old heartbeat and is retried on the next boot', async () => {
-  const store = fakeStore({ failPending: true })
+test('armed goals from a crash residue are merged into the pending plan as re-arm rows', async () => {
+  const plan = {
+    version: 3, planId: 'pause-1', source: 'pause', status: 'paused',
+    sessions: [{ sessionId: 's1', running: true, intent: 'continue', epoch: 1, lastTurn: 2 }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe()
+  probe.crashPlan = (residue, options) => ({
+    version: 3, planId: options.planId, source: 'crash', status: 'paused',
+    sessions: (residue.sessions ?? []).map((row) => ({ sessionId: row.sessionId, intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true })),
+    goals: (residue.goals ?? []).map((row) => ({ ...row, armedRevision: row.revision })),
+    jobs: [], attention: [],
+  })
+  const { engine } = engineFor({ store, probe })
+  await engine.hydrate({
+    residue: {
+      sessions: [{ sessionId: 's1' }, { sessionId: 's2' }],
+      goals: [{ sessionId: 's2', goalId: 'g2', revision: 4 }],
+      at: 5,
+    },
+  })
+  // The pause plan's own goal rows stay authoritative; the crash fills the gap.
+  assert.deepEqual(store.state.plan.goals, [{ sessionId: 's2', goalId: 'g2', revision: 4, armedRevision: 4 }])
+  assert.deepEqual(store.state.plan.attention, [
+    { kind: 'session', id: 's2', detail: 'crashed: mounted only' },
+    { kind: 'goal', id: 's2', detail: 'crashed: goal re-armed on restore' },
+  ])
+  assert.deepEqual(store.state.plan.sessions.map((row) => [row.sessionId, row.intent]), [['s1', 'continue'], ['s2', 'mount']])
+})
+
+test('a crash plan that holds only goals still resumes them and never fakes a session', async () => {
+  const probe = fakeProbe()
+  probe.crashPlan = (residue, options) => (residue === null ? null : {
+    version: 3, planId: options.planId, source: 'crash', status: 'paused',
+    sessions: (residue.sessions ?? []).map((row) => ({ sessionId: row.sessionId, intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true })),
+    goals: (residue.goals ?? []).map((row) => ({ sessionId: row.sessionId, goalId: row.goalId, revision: row.revision, armedRevision: row.revision })),
+    jobs: [], attention: [],
+  })
+  const store = fakeStore()
+  const { engine } = engineFor({ store, probe })
+  await engine.hydrate({ residue: { sessions: [], goals: [{ sessionId: 's1', goalId: 'g1', revision: 3 }], at: 7 } })
+  assert.equal(store.state.pending !== null, true)
+  assert.deepEqual(store.state.pending.sessions, [])
+  assert.deepEqual(store.state.pending.goals, [{ sessionId: 's1', goalId: 'g1', revision: 3, armedRevision: 3 }])
+
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.deepEqual(probe.calls.filter((call) => call[0] === 'goal'), [['goal', 'g1']])
+  assert.equal(store.state.pending, null)
+  assert.equal(store.state.result.planId !== undefined, true)
+})
+
+test('a crash residue that cannot be stored keeps the old heartbeat and is retried on the next boot', async () => {  const store = fakeStore({ failPending: true })
   const held = { count: 0, hold() { this.count += 1 } }
   const probe = fakeProbe()
   probe.crashPlan = (residue, options) => ({

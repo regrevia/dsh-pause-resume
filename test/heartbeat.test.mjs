@@ -38,7 +38,7 @@ test('a heartbeat from another process is crash residue', async () => {
   oldBeat(root)
   const beat = createHeartbeat({ dir: root, bootId: 'new', listRunning: async () => [] })
   beat.start()
-  assert.deepEqual(beat.residue, { sessions: [{ sessionId: 's1' }], at: 111 })
+  assert.deepEqual(beat.residue, { sessions: [{ sessionId: 's1' }], goals: [], at: 111 })
   await beat.flush()
   assert.equal(readBeat(root).bootId, 'new')
   assert.deepEqual(beat.residue.sessions, [{ sessionId: 's1' }])
@@ -50,7 +50,7 @@ test('a non-numeric timestamp is residue without a time', () => {
   oldBeat(root, { updatedAt: 'then' })
   const beat = createHeartbeat({ dir: root, bootId: 'new', listRunning: async () => [] })
   beat.start()
-  assert.deepEqual(beat.residue, { sessions: [{ sessionId: 's1' }], at: null })
+  assert.deepEqual(beat.residue, { sessions: [{ sessionId: 's1' }], goals: [], at: null })
   beat.stop()
 })
 
@@ -81,10 +81,11 @@ test('the file records this boot and the current set', async () => {
   await beat.flush()
   await settle()
   const written = readBeat(root)
-  assert.equal(written.version, 2)
+  assert.equal(written.version, 3)
   assert.equal(written.bootId, 'b')
   assert.equal(typeof written.updatedAt, 'number')
   assert.deepEqual(written.sessions, [{ sessionId: 'a' }, { sessionId: 'b' }])
+  assert.deepEqual(written.goals, [])
   beat.stop()
 })
 
@@ -147,7 +148,7 @@ test('a clean stop leaves the file and the residue in place', async () => {
   beat.stop()
   await sleep(30)
   assert.equal(readFileSync(beatPath(root), 'utf8'), before)
-  assert.deepEqual(beat.residue, { sessions: [{ sessionId: 's1' }], at: 111 })
+  assert.deepEqual(beat.residue, { sessions: [{ sessionId: 's1' }], goals: [], at: 111 })
 })
 
 test('release clears the residue and records this process instead', async () => {
@@ -204,4 +205,68 @@ test('flush answers false while the disk refuses and true once it works', async 
   assert.equal(written.bootId, 'b2')
   assert.deepEqual(written.sessions, [{ sessionId: 's1' }])
   healthy.stop()
+})
+
+test('armed goals are recorded next to the sessions and survive as residue', async () => {
+  const root = dir()
+  const goals = [
+    { sessionId: 's1', goalId: 'g1', revision: 4 },
+    { sessionId: 's2', goalId: 'g2', revision: 7 },
+    { sessionId: 's1', goalId: 'g1', revision: 4 },
+  ]
+  const beat = createHeartbeat({ dir: root, bootId: 'b', listRunning: async () => ({ sessions: ['s1', 's2'], goals }) })
+  beat.start()
+  await beat.flush()
+  const written = readBeat(root)
+  assert.deepEqual(written.sessions, [{ sessionId: 's1' }, { sessionId: 's2' }])
+  assert.deepEqual(written.goals, [
+    { sessionId: 's1', goalId: 'g1', revision: 4 },
+    { sessionId: 's2', goalId: 'g2', revision: 7 },
+  ])
+  beat.stop()
+
+  const next = createHeartbeat({ dir: root, bootId: 'next', listRunning: async () => [] })
+  next.start()
+  assert.deepEqual(next.residue.goals, [
+    { sessionId: 's1', goalId: 'g1', revision: 4 },
+    { sessionId: 's2', goalId: 'g2', revision: 7 },
+  ])
+  next.stop()
+})
+
+test('goals alone are enough residue: a goal between rounds is still owed work', () => {
+  const root = dir()
+  oldBeat(root, { version: 3, sessions: [], goals: [{ sessionId: 's1', goalId: 'g1', revision: 2 }] })
+  const beat = createHeartbeat({ dir: root, bootId: 'new', listRunning: async () => [] })
+  beat.start()
+  assert.deepEqual(beat.residue, { sessions: [], goals: [{ sessionId: 's1', goalId: 'g1', revision: 2 }], at: 111 })
+  beat.stop()
+})
+
+test('a malformed goal row is dropped instead of poisoning the residue', async () => {
+  const root = dir()
+  const goals = [
+    { sessionId: 's1', goalId: 'g1', revision: 3 },
+    { sessionId: 's2', goalId: 'g2', revision: '3' },
+    { sessionId: '', goalId: 'g3', revision: 3 },
+    { sessionId: 's4', goalId: '', revision: 3 },
+    { sessionId: 's5', goalId: 'g5' },
+  ]
+  const beat = createHeartbeat({ dir: root, bootId: 'b', listRunning: async () => ({ sessions: [], goals }) })
+  beat.note({ sessions: [], goals })
+  await beat.flush()
+  assert.deepEqual(readBeat(root).goals, [{ sessionId: 's1', goalId: 'g1', revision: 3 }])
+  beat.stop()
+})
+
+test('a legacy array lister still records sessions and no goals', async () => {
+  const root = dir()
+  oldBeat(root, { version: 3, sessions: [{ sessionId: 's9' }], goals: [{ sessionId: 's9', goalId: 'g9', revision: 1 }] })
+  const beat = createHeartbeat({ dir: root, bootId: 'b', listRunning: async () => ['s1'] })
+  beat.start()
+  await beat.flush()
+  const written = readBeat(root)
+  assert.deepEqual(written.sessions, [{ sessionId: 's1' }])
+  assert.deepEqual(written.goals, [])
+  beat.stop()
 })
