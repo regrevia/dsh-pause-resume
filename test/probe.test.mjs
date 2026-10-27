@@ -418,6 +418,21 @@ test('crashPlan() drops goal rows that cannot be proven instead of guessing a re
   assert.deepEqual(plan.goals, [{ sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: 4 }])
 })
 
+test('crashPlan() never turns an empty session id into a mount row', () => {
+  // A row with no id cannot be mounted or named in the report; keeping it would make resume look
+  // like it restored something it never touched. The heartbeat cannot write such a row, but the
+  // plan reader is the last gate before a person's press.
+  const probe = createProbe(registry({}))
+  const plan = probe.crashPlan(
+    { sessions: [{ sessionId: '' }, { sessionId: 's1' }, { sessionId: 's1' }], goals: [] },
+    { planId: 'crash-empty' },
+  )
+  assert.deepEqual(plan.sessions.map((row) => row.sessionId), ['s1'])
+  assert.equal(plan.crashes, 1)
+  // Nothing valid left: no plan at all, rather than a plan that restores nothing.
+  assert.equal(probe.crashPlan({ sessions: [{ sessionId: '' }], goals: [] }), null)
+})
+
 test('listResidue() records the open turns and the armed goals, and nothing else', () => {
   const running = { id: 'a', status: 'running', phase: { lastTurn: 1 } }
   const idle = { id: 'b', status: 'idle', phase: { lastTurn: 2 } }

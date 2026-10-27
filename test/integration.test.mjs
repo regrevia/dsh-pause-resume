@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { createStore } from '../lib/snapshot.js'
 import { createEngine } from '../lib/engine.js'
 import { createHeartbeat } from '../lib/heartbeat.js'
+import { createProbe } from '../lib/probe.js'
 
 // The store is the only thing that survives a process here: these tests run the real atomic writer
 // against a temp directory, so a plan field the writer drops or a file the reader misses fails a
@@ -218,6 +219,53 @@ test('a crash found by the heartbeat is mounted only, and the heartbeat takes th
     const again = await second.hydrate()
     assert.equal(again.phase, 'idle')
     assert.equal(second.describe().source, null)
+  } finally {
+    cleanup()
+  }
+})
+
+test('a real v3 heartbeat record reaches the resume loop as a goal to re-arm', async () => {
+  const { dir, cleanup } = tempDir()
+  try {
+    // The dead process left one open turn and one armed goal in the file on disk.
+    const dead = createHeartbeat({
+      dir,
+      bootId: 'dead-1',
+      intervalMs: 20,
+      now: () => 1700000000001,
+      log: () => {},
+      listRunning: () => ({ sessions: [{ sessionId: 's1' }], goals: [{ sessionId: 's1', goalId: 'g1', revision: 4 }] }),
+    })
+    dead.start()
+    await dead.flush()
+    dead.stop()
+    const raw = JSON.parse(fs.readFileSync(join(dir, 'running.json'), 'utf8'))
+    assert.equal(raw.version, 3)
+    assert.deepEqual(raw.goals, [{ sessionId: 's1', goalId: 'g1', revision: 4 }])
+
+    // The next process reads that file before overwriting it and uses the real plan reader, so a
+    // field the writer and the reader disagree on fails here instead of at a person's restart.
+    const live = createHeartbeat({ dir, bootId: 'live-1', intervalMs: 20, listRunning: () => ({ sessions: [], goals: [] }), log: () => {} })
+    const residue = live.peek()
+    assert.deepEqual(residue.goals, [{ sessionId: 's1', goalId: 'g1', revision: 4 }])
+    const probe = harness()
+    probe.crashPlan = createProbe({}, {}).crashPlan
+    const store = createStore(dir, { log: () => {} })
+    const engine = createEngine({ store, probe, heartbeat: live, now: () => 1700000000000, bootId: 'live-1', log: () => {} })
+    await engine.hydrate({ residue })
+    assert.equal(engine.phase, 'idle')
+    assert.equal(engine.describe().action, 'resume')
+    assert.equal(engine.describe().counts.goals, 1)
+    assert.equal(engine.describe().counts.sessions, 1)
+
+    const outcome = await engine.resume()
+    assert.equal(outcome.status, 'resumed')
+    // The open turn is mounted, never re-sent; the goal is re-armed by its recorded revision and
+    // needs no extra read that would see it as already armed and give up.
+    assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => [call[1], call[2]]), [['s1', 'mount']])
+    assert.deepEqual(probe.calls.filter((call) => call[0] === 'goal'), [['goal', 'g1']])
+    assert.equal(probe.calls.some((call) => call[0] === 'prepareGoal'), false)
+    live.stop()
   } finally {
     cleanup()
   }

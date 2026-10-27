@@ -1,3 +1,20 @@
+## 0.4.15
+
+Two ways the crash reader could invent work that was not there, found while tracing the record a
+real restart leaves behind.
+
+* A residue row can name an empty session id (a hand-built record, a file from a different writer).
+  The crash plan used to keep it as a mount row, so the next press tried to attach a session with
+  no name and the restore could never finish. Empty ids are now dropped, the same rule the goal
+  rows already used.
+* The same session id twice became two mount rows and inflated the crash count. The heartbeat
+  dedupes before writing, so this only arrived from a foreign record; the reader now dedupes too
+  instead of trusting its caller.
+* New coverage: a real version 3 heartbeat file written by one boot is read by the next, turned
+  into a plan by the real reader, and resumed through the real store - the turn is mounted, the
+  armed goal is restored by its recorded revision, and no extra read is made. The writer, the
+  reader and the resume loop are now tested against each other instead of against a stub.
+
 ## 0.4.14
 
 A pause symbol shown after an unclean exit promised work that the crash record did not keep.
