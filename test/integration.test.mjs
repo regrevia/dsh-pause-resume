@@ -191,11 +191,11 @@ test('a crash found by the heartbeat is reported without starting its idle rows,
 
     const outcome = await first.resume()
     assert.equal(outcome.status, 'resumed')
-    // Neither session is started: a crash row only proves the session existed when the process
-    // died. Mounting it is enough to fire queued prompts, so the row is reported instead.
-    const sessions = probe.calls.filter((call) => call[0] === 'session')
-    assert.deepEqual(sessions, [])
-    assert.deepEqual(outcome.summary.skipped, ['session s1', 'session s2'])
+    // Both sessions are asked. The probe attaches them and reports what it can prove; skipping the
+    // rows here is what used to consume a crashed plan with nothing restored.
+    const sessions = probe.calls.filter((call) => call[0] === 'session').map((call) => call[1])
+    assert.deepEqual(sessions, ['s1', 's2'])
+    assert.deepEqual(outcome.summary.skipped, [])
     assert.equal(probe.calls.some((call) => call[0] === 'stop'), false)
 
     const store = createStore(dir, { log: () => {} })
@@ -262,13 +262,11 @@ test('a real v4 heartbeat record is read by the resume loop without reviving idl
 
     const outcome = await engine.resume()
     assert.equal(outcome.status, 'resumed')
-    // The record proves the session and goal existed, not that either was working after the
-    // restart: the session is not started and the goal is not armed. What this case keeps guarding
-    // is that the writer and the reader agree on the file, so nothing is silently dropped.
-    assert.deepEqual(probe.calls.filter((call) => call[0] === 'session'), [])
-    assert.deepEqual(probe.calls.filter((call) => call[0] === 'goal'), [])
-    assert.deepEqual(outcome.summary.skipped, ['session s1'])
-    assert.ok(outcome.summary.attention.some((row) => /g1/u.test(row)), outcome.summary.attention.join('|'))
+    // What this case guards is that the writer and the reader agree on the file, so nothing is
+    // silently dropped: the session is probed and the goal is restored instead of being gated off.
+    assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => call[1]), ['s1'])
+    assert.deepEqual(probe.calls.filter((call) => call[0] === 'goal').map((call) => call[1]), ['g1'])
+    assert.equal(outcome.summary.skipped.length, 0)
     live.stop()
   } finally {
     cleanup()

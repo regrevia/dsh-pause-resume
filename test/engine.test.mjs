@@ -429,10 +429,10 @@ test('a crash plan survives a second restart and is released only once it is res
   const outcome = await second.resume()
   assert.equal(outcome.status, 'resumed')
   assert.equal(store.state.pending, null)
-  // A crash row only proves the session existed when the process died; it does not prove a turn
-  // was open after the restart, so both rows are reported without being started.
-  assert.deepEqual(store.state.result.summary.restored, [])
-  assert.equal(store.state.result.summary.skipped.length, 2)
+  // A crash row proves the session existed when the process died. The restart attaches it and lets
+  // the probe read the live turn: the shipped build skipped these rows and consumed the plan with
+  // nothing started, which is the "icon flipped, no session came back" report.
+  assert.deepEqual(store.state.result.summary.restored, ['session s1', 'session s2'])
   assert.equal(store.state.result.status, 'restored')
   assert.equal(heartbeat.released, 1)
   assert.equal(second.describe().action, 'none')
@@ -715,11 +715,10 @@ test('a merged crash plan is the one resumed after its write failed, so no new s
   store.state.failPending = false
   const outcome = await engine.resume()
   assert.equal(outcome.status, 'resumed')
-  // Every row here is a mount-only crash row: the merged plan is what had to be resumed, but its
-  // sessions are reported instead of started, because neither had a turn open after the restart.
-  assert.deepEqual(outcome.summary.restored, [])
-  assert.deepEqual(outcome.summary.skipped, ['session old-s1', 'session new-s2'])
-  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session'), [])
+  // Every row here is a mount-only crash row: the merged plan is what had to be resumed, and both
+  // sessions are attached rather than reported as skipped.
+  assert.deepEqual(outcome.summary.restored, ['session old-s1', 'session new-s2'])
+  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => call[1]), ['old-s1', 'new-s2'])
   assert.equal(store.state.pending, null)
 })
 
@@ -835,10 +834,9 @@ test('a crash record merged into a pause plan survives a failed merge write', as
 
   const outcome = await engine.resume()
   assert.equal(outcome.status, 'resumed')
-  // `s1` was paused mid-turn and is continued; `s2` was only present when the process died, so it
-  // is reported and never started.
-  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => call[1]), ['s1'])
-  assert.deepEqual(outcome.summary.skipped, ['session s2'])
+  // `s1` was paused mid-turn and is continued; `s2` was only present when the process died, so it is
+  // attached and probed instead of being dropped from the restore.
+  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => call[1]), ['s1', 's2'])
   assert.equal(held.released, 1)
   assert.equal(store.state.plan, null)
 })
@@ -1355,7 +1353,7 @@ test('a session an earlier boot restored is checked again instead of trusted', a
   assert.equal(engine.describe().phase, 'idle')
 })
 
-test('a plan that never comes back closes as attention instead of staying unfinished forever', async () => {
+test('a plan that never comes back stays open instead of closing as attention', async () => {
   const plan = {
     version: 3, planId: 'pause-10', source: 'pause', status: 'paused',
     sessions: [{ sessionId: 's1', intent: 'continue', epoch: 0, running: true, lastTurn: 1 }], goals: [], jobs: [], attention: [],
@@ -1367,21 +1365,19 @@ test('a plan that never comes back closes as attention instead of staying unfini
     return { status: 'failed', detail: 'resume timed out' }
   }
   const { engine } = engineFor({ store, probe, maxRestoreAttempts: 3 })
-  const first = await engine.resume()
-  assert.equal(first.status, 'partial')
+  assert.equal((await engine.resume()).status, 'partial')
   assert.equal((await engine.resume()).status, 'partial')
   const last = await engine.resume()
-  // Out of attempts: attention is terminal, so the plan closes with the failure still reported.
-  assert.equal(last.status, 'resumed')
-  assert.notEqual(store.state.consumed, null)
-  assert.deepEqual(store.state.consumed.plan.restore.gaveUp, ['session s1: resume timed out'])
-  assert.match(store.state.consumed.summary.attention.join(' '), /resume timed out/u)
-  const state = engine.describe()
-  assert.equal(state.phase, 'idle')
-  assert.equal(state.action, 'none')
-  assert.equal(state.outstanding, 0)
-  assert.equal(state.attention, 1)
-  assert.match(state.result.attention.join(' '), /resume timed out/u)
+  // Out of attempts is not permission to give up: the plan stays on disk, the row stays outstanding
+  // and the button keeps offering the same restore. Closing it as attention is how unfinished work
+  // disappeared while the page claimed everything was back.
+  assert.equal(last.status, 'partial')
+  assert.equal(store.state.plan?.planId, 'pause-10')
+  assert.equal(store.state.consumed, null)
+  assert.equal(last.outstanding, 1)
+  assert.deepEqual(store.state.plan.restore.failed, ['session s1: resume timed out'])
+  assert.equal(engine.describe().action, 'resume')
+  assert.equal(engine.describe().outstanding, 1)
 })
 
 test('the glyph flips to pause while a restore is still running, so the press can stop it', async () => {
@@ -1409,7 +1405,7 @@ test('the glyph flips to pause while a restore is still running, so the press ca
   assert.equal(engine.describe().phase, 'idle')
 })
 
-test('nothing that was only present at a crash is started or re-armed by a resume', async () => {
+test('a crash session and its goal are attached and re-armed by a resume', async () => {
   // The shape from the field: a pause plan plus a crash residue. One paused turn must continue; the
   // session and the goal that only existed when the process died must not start work again.
   const plan = {
@@ -1435,9 +1431,11 @@ test('nothing that was only present at a crash is started or re-armed by a resum
   })
   const outcome = await engine.resume()
   assert.equal(outcome.status, 'resumed')
-  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session'), [['session', 's1']])
-  assert.deepEqual(probe.calls.filter((call) => call[0] === 'goal'), [])
-  assert.deepEqual(outcome.summary.skipped, ['session s2'])
-  assert.ok(outcome.summary.attention.some((row) => /g2/u.test(row)))
+  // Both sessions are probed: the paused one continues and the crash one is attached. The crash
+  // goal is restored too — the gate that dropped it whenever the predecessor turn was unprovable is
+  // what turned a whole crashed set into attention with zero goals resumed.
+  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session'), [['session', 's1'], ['session', 's2']])
+  assert.deepEqual(probe.calls.filter((call) => call[0] === 'goal'), [['goal', 'g2']])
+  assert.ok(outcome.summary.restored.some((row) => /g2/u.test(row)))
   assert.equal(store.state.plan, null)
 })
