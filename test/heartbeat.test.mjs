@@ -404,3 +404,15 @@ test('a v4 file from another boot is residue, this boot own file is not', () => 
   const same = createHeartbeat({ dir: root, bootId: 'dead', listRunning: async () => [] })
   assert.equal(same.peek(), null)
 })
+
+test('a child route survives the crash record so it can be restored through its parent', async () => {
+  const root = dir()
+  oldBeat(root, { sessions: [{ sessionId: 's2', lastTurn: 3, parent: 's1' }, { sessionId: 's1', lastTurn: 1 }] })
+  const beat = createHeartbeat({ dir: root, bootId: 'new', listRunning: async () => [{ sessionId: 's1', lastTurn: 1 }, { sessionId: 's2', lastTurn: 3, parent: 's1' }] })
+  const residue = beat.peek()
+  assert.deepEqual(residue.sessions, [{ sessionId: 's1', lastTurn: 1 }, { sessionId: 's2', lastTurn: 3, parent: 's1' }])
+  beat.start()
+  await sleep(30)
+  const written = readBeat(root)
+  assert.deepEqual(written.sessions, [{ sessionId: 's1', lastTurn: 1 }, { sessionId: 's2', lastTurn: 3, parent: 's1' }])
+})

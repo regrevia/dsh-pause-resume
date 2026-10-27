@@ -1653,3 +1653,161 @@ test('a crash residue merged into a pause plan keeps every operation field the p
   assert.equal(store.state.writes.length, writes)
   assert.equal(store.state.plan.sessions.filter((row) => row.sessionId === 's2').length, 1)
 })
+
+test('pause() writes what each job stop actually achieved onto the job row', async () => {
+  const live = { readable: true, sessions: [], goals: [], jobs: [{ id: 'j1', owner: 's1', status: 'running' }, { id: 'j2', owner: null, status: 'running' }] }
+  const probe = fakeProbe(live, {
+    killedJobs: [{ id: 'j1', owner: 's1' }],
+    jobErrors: ['job j2: stop requested, still running'],
+    jobStates: [{ id: 'j1', owner: 's1', status: 'stopped' }, { id: 'j2', owner: null, status: 'stopping', detail: 'still running' }],
+    stillRunning: [],
+  })
+  const store = fakeStore()
+  const { engine } = engineFor({ store, probe })
+  const outcome = await engine.pause()
+  assert.equal(outcome.status, 'partial')
+  const written = store.state.writes.at(-1)
+  assert.deepEqual(written.jobs, [
+    { id: 'j1', owner: 's1', status: 'running', stop: 'stopped' },
+    { id: 'j2', owner: null, status: 'running', stop: 'stopping', stopDetail: 'still running' },
+  ])
+  const state = engine.describe()
+  assert.equal(state.action, 'resume')
+  assert.equal(state.counts.jobs, 2)
+})
+
+test('a plan that only owes a job report resumes without starting anything and is spent once', async () => {
+  const plan = {
+    version: 3, planId: 'p1', source: 'pause', status: 'partial',
+    sessions: [], goals: [],
+    jobs: [{ id: 'j1', owner: null, status: 'running', stop: 'stopped' }],
+    attention: [{ kind: 'job', id: 'j1', detail: 'stopped, not restarted' }],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe()
+  const { engine } = engineFor({ store, probe })
+  // Stopped jobs are reported separately: a clean page does not keep a dot forever.
+  assert.equal(engine.describe().attention, 1)
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.equal(outcome.summary.jobs, 1)
+  assert.deepEqual(outcome.summary.jobsStopped, ['job j1: stopped, not restarted'])
+  assert.equal(probe.calls.some((call) => call[0] === 'session' || call[0] === 'goal'), false)
+  assert.equal(store.state.consumed?.plan.planId, 'p1')
+})
+
+test('a job settling after the pause does not change the plan or wake the restore', async () => {
+  const live = { readable: true, sessions: [], goals: [], jobs: [{ id: 'j1', owner: null, status: 'running' }] }
+  const probe = fakeProbe(live, {
+    jobErrors: ['job j1: stop requested, still running'],
+    jobStates: [{ id: 'j1', owner: null, status: 'stopping', detail: 'still running' }],
+  })
+  const store = fakeStore()
+  const { engine } = engineFor({ store, probe })
+  assert.equal((await engine.pause()).status, 'partial')
+  const writesAfterPause = store.state.writes.length
+  const journalAfterPause = store.state.journal.size
+  // The process exits later. Nothing in a paused engine listens for that, so the record must not
+  // move: the plan is still the pause's evidence, not a guess at what the job did afterwards.
+  live.jobs[0].status = 'completed'
+  const state = engine.describe()
+  assert.equal(state.action, 'resume')
+  assert.equal(store.state.writes.length, writesAfterPause)
+  assert.equal(store.state.journal.size, journalAfterPause)
+  assert.deepEqual(store.state.plan.jobs, [{ id: 'j1', owner: null, status: 'running', stop: 'stopping', stopDetail: 'still running' }])
+})
+
+test('a three-level subagent chain restores in parent-first order', async () => {
+  const plan = {
+    version: 3, planId: 'p1', source: 'pause', status: 'paused',
+    sessions: [
+      { sessionId: 's3', running: true, intent: 'continue', epoch: 1, lastTurn: 2, parent: 's2', origin: 'subagent' },
+      { sessionId: 's1', running: true, intent: 'continue', epoch: 1, lastTurn: 2 },
+      { sessionId: 's2', running: true, intent: 'continue', epoch: 1, lastTurn: 2, parent: 's1', origin: 'subagent' },
+    ],
+    goals: [], jobs: [], attention: [],
+  }
+  const probe = fakeProbe()
+  const { engine } = engineFor({ store: fakeStore({ plan }), probe })
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => call[1]), ['s1', 's2', 's3'])
+})
+
+test('a child whose parent is missing gets a mount-only parent row, then restores', async () => {
+  const plan = {
+    version: 3, planId: 'p1', source: 'pause', status: 'paused',
+    sessions: [{ sessionId: 's2', running: true, intent: 'continue', epoch: 0, lastTurn: 1, parent: 's1', origin: 'subagent' }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe()
+  const { engine } = engineFor({ store, probe })
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  const synthesized = store.state.consumed.plan.sessions.find((row) => row.sessionId === 's1')
+  assert.deepEqual(synthesized, { sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null, parent: null, origin: 'root', crash: false })
+  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => [call[1], call[2]]), [['s1', false], ['s2', true]])
+})
+
+test('a cyclic parent map finishes instead of hanging or looping', async () => {
+  const plan = {
+    version: 3, planId: 'p1', source: 'pause', status: 'paused',
+    sessions: [
+      { sessionId: 'a', running: true, intent: 'continue', epoch: 1, lastTurn: 1, parent: 'b', origin: 'subagent' },
+      { sessionId: 'b', running: true, intent: 'continue', epoch: 1, lastTurn: 1, parent: 'a', origin: 'subagent' },
+    ],
+    goals: [], jobs: [], attention: [],
+  }
+  const probe = fakeProbe()
+  const { engine } = engineFor({ store: fakeStore({ plan }), probe })
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  const restored = probe.calls.filter((call) => call[0] === 'session').map((call) => call[1]).sort()
+  assert.deepEqual(restored, ['a', 'b'])
+})
+
+test('a crash record merged into a pause plan keeps the job rows and their stop state', async () => {
+  const plan = {
+    version: 3, planId: 'p1', source: 'pause', status: 'paused',
+    sessions: [{ sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: 2 }],
+    goals: [], attention: [],
+    jobs: [{ id: 'j1', owner: 's1', status: 'running', stop: 'stopping', stopDetail: 'still running' }],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe()
+  const engine = createEngine({ store, probe, now: () => 1700000000000, bootId: 'boot-1', log: () => {} })
+  await engine.hydrate({ residue: { at: 1699999999999, sessions: [{ sessionId: 's2', lastTurn: 4 }], goals: [] } })
+  const merged = store.state.plan
+  assert.equal(merged.jobs.length, 1)
+  assert.deepEqual(merged.jobs[0], { id: 'j1', owner: 's1', status: 'running', stop: 'stopping', stopDetail: 'still running' })
+  assert.deepEqual(merged.sessions.map((row) => row.sessionId).sort(), ['s1', 's2'])
+})
+
+test('a pause during a restore writes what the job stop achieved, not just what was requested', async () => {
+  const plan = {
+    version: 3, planId: 'p1', source: 'pause', status: 'paused',
+    sessions: [{ sessionId: 's1', running: true, lastTurn: 5, epoch: 2, intent: 'continue' }],
+    goals: [], attention: [],
+    jobs: [{ id: 'j1', owner: 's1', status: 'running' }],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe(
+    { sessions: [{ sessionId: 's1', running: true, lastTurn: 5 }], goals: [], jobs: [{ id: 'j1', owner: 's1', status: 'running' }], readable: true },
+    { jobStates: [{ id: 'j1', status: 'stopped' }] },
+  )
+  let release = null
+  probe.restoreSession = async (session) => {
+    probe.calls.push(['session', session.sessionId])
+    await new Promise((resolve) => { release = resolve })
+    return { status: 'restored', detail: 'attached', turn: 6 }
+  }
+  const engine = createEngine({ store, probe, now: () => 1700000000000, bootId: 'boot-1', log: () => {} })
+  const running = engine.resume()
+  while (release === null) await new Promise((resolve) => setTimeout(resolve, 0))
+  const outcome = await engine.pause()
+  assert.equal(outcome.interrupted, true)
+  assert.equal(store.state.plan.jobs[0].stop, 'stopped')
+  release()
+  await running
+})

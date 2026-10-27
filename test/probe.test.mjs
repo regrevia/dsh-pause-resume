@@ -1133,3 +1133,64 @@ test('a crash plan reads an open turn as owed and a closed one as finished', () 
     assert.equal(plan.sessions[0].intent, item.expected, `lastTurn ${item.lastTurn} open ${item.open}`)
   }
 })
+
+test('stop() records each job stop state instead of calling a requested stop a kill', async () => {
+  const rows = new Map([
+    ['j1', { id: 'j1', status: 'running' }],
+    ['j2', { id: 'j2', status: 'running' }],
+    ['j3', { id: 'j3', status: 'running' }],
+  ])
+  const killCalls = []
+  const services = {
+    agents: { get: () => undefined, list: () => [] },
+    jobs: {
+      get: (id) => (rows.has(id) ? { ...rows.get(id) } : undefined),
+      kill: (id) => {
+        killCalls.push(id)
+        if (id === 'j1') rows.get('j1').status = 'killed'
+        if (id === 'j2') throw new Error('job service refused the request')
+        // j3 accepts the request but its process is still alive at the end of the budget.
+      },
+    },
+  }
+  const probe = createProbe(registry(services), { graceMs: 80 })
+  const stopped = await probe.stop({
+    sessions: [], goals: [],
+    jobs: [{ id: 'j1', owner: null }, { id: 'j2', owner: null }, { id: 'j3', owner: null }],
+  })
+  assert.deepEqual(killCalls, ['j1', 'j2', 'j3'])
+  assert.deepEqual(stopped.jobStates, [
+    { id: 'j1', owner: null, status: 'stopped' },
+    { id: 'j2', owner: null, status: 'stop-failed', detail: 'job service refused the request' },
+    { id: 'j3', owner: null, status: 'stopping', detail: 'still running' },
+  ])
+  assert.deepEqual(stopped.killedJobs, [{ id: 'j1', owner: null }])
+  assert.equal(stopped.jobErrors.length, 2)
+  assert.match(stopped.jobErrors[0], /refused/u)
+  assert.match(stopped.jobErrors[1], /stop requested, still running/u)
+})
+
+test('the crash record keeps the parent route even when the runtime has forgotten it', () => {
+  const services = { agents: { list: () => [], get: () => undefined } }
+  const probe = createProbe(registry(services))
+  assert.deepEqual(listResidue(registry(services)), { sessions: [], goals: [], readable: true })
+  const plan = probe.crashPlan({ sessions: [{ sessionId: 's2', lastTurn: 4, parent: 's1' }], goals: [] }, { planId: 'p1' })
+  assert.equal(plan.sessions[0].parent, 's1')
+  assert.equal(plan.sessions[0].origin, 'subagent')
+})
+
+test('listResidue() records the live parent of a running child', () => {
+  const services = {
+    agents: {
+      list: () => [
+        { id: 's1', status: 'running', phase: { kind: 'idle', lastTurn: 2 } },
+        { id: 's2', status: 'running', phase: { kind: 'idle', lastTurn: 5 }, session: { header: { parentSession: 's1' } } },
+      ],
+    },
+  }
+  const residue = listResidue(registry(services))
+  assert.deepEqual(residue.sessions, [
+    { sessionId: 's1', lastTurn: 2 },
+    { sessionId: 's2', lastTurn: 5, parent: 's1' },
+  ])
+})
