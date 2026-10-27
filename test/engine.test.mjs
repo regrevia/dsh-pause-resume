@@ -1811,3 +1811,21 @@ test('a pause during a restore writes what the job stop achieved, not just what 
   release()
   await running
 })
+
+test('the progressive restore stays off unless the setting is explicitly enabled', async () => {
+  const plan = {
+    version: 3, planId: 'p1', source: 'pause', status: 'paused',
+    sessions: [{ sessionId: 's1', running: true, lastTurn: 1 }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe()
+  const gate = { guarded: 0, unguarded: 0, aborted: 0, guard() { this.guarded += 1 }, unguard() { this.unguarded += 1 }, abort() { this.aborted += 1 }, stats() { return { capacity: 1, running: 0, queued: 0 } } }
+  const engine = createEngine({ store, probe, bootId: 'boot-1', gate, log: () => {} })
+  assert.equal(engine.describe().restore.progressive, false, 'an install that never opted in reports the plain path')
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.equal(gate.guarded, 0)
+  assert.equal(gate.unguarded, 0)
+  assert.equal(gate.aborted, 0)
+})
