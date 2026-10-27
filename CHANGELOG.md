@@ -1,3 +1,7 @@
+## 0.5.10
+
+- When a crash plan is re-derived, a row the current residue no longer names keeps its mount-only form and its attention line instead of disappearing from the plan.
+
 ## 0.5.9
 
 - A crash plan written by a build that could not read live turns (every row mount-only) is re-derived at the next boot from the residue that is readable now. The press then continues the open turns instead of only attaching them; a pause plan is never rewritten.

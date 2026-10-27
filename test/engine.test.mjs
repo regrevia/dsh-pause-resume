@@ -412,7 +412,10 @@ test('hydrate() re-derives crash rows a build without live turns wrote as mount-
     status: 'paused',
     source: 'crash',
     createdAt: '1970-01-01T00:00:00.000Z',
-    sessions: [{ sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true, retry: 2 }],
+    sessions: [
+      { sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true, retry: 2 },
+      { sessionId: 's2', intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true },
+    ],
     goals: [{ sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: 4, crash: true }],
     jobs: [],
   }
@@ -437,6 +440,8 @@ test('hydrate() re-derives crash rows a build without live turns wrote as mount-
   assert.equal(store.state.pending.sessions[0].intent, 'continue')
   assert.equal(store.state.pending.sessions[0].lastTurn, 7)
   assert.equal(store.state.pending.sessions[0].retry, 2)
+  // A session the residue no longer names keeps its mount-only row instead of vanishing.
+  assert.deepEqual(store.state.pending.sessions.map((row) => [row.sessionId, row.intent]), [['s1', 'continue'], ['s2', 'mount']])
   assert.equal(store.state.pending.goals[0].armedRevision, 4)
 })
 
