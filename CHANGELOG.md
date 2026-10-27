@@ -1,3 +1,9 @@
+## 0.5.12
+
+- The page that started a restore can now stop it: while the Host reports `pause` (a restore is running), the glyph is the pause button again and pressing it aborts this tab's own open request and interrupts the restore, leaving the plan retryable. A pause press in flight is still never interrupted by pressing pause again, and a resume press still spins until the Host stops calling it resuming.
+- The button's press rules are covered by tests that load the real `client.js` with a stubbed React, so "the same page cannot stop its own restore" fails a test instead of shipping again.
+- A goal-only crash residue is now proven end-to-end through the real plan reader: no session row is invented, the goal is armed alone, and the restore reports no failure.
+
 ## 0.5.11
 
 - The continuation message now names the background jobs this pause stopped and asks for them to be restarted, so a continued turn puts that work back itself. A job cannot be replayed by the host: a job is a live process, and starting one needs the closure that produced it.

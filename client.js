@@ -173,6 +173,8 @@ window.__ModuleLoader__.load({
       const inflight = React.useRef(null)
       /** Distinguishes presses so a superseded one cannot clear the newer one's state. */
       const pressToken = React.useRef(0)
+      /** Which action this tab's open request is: a pause press must not interrupt another pause. */
+      const pressKind = React.useRef(null)
 
       const apply = React.useCallback((next) => {
         if (!mounted.current || next === null) return
@@ -232,8 +234,14 @@ window.__ModuleLoader__.load({
         }
       }, [pull])
 
-      const busy = pressing || state.action === 'busy'
       const action = state.action === 'pause' || state.action === 'resume' ? state.action : null
+      /**
+       * A resume request can stay open for the whole restore, and the Host answers `pause` while it // ui-copy-ignore
+       * is resuming. That answer is the same page's way back out: the glyph returns to the pause
+       * button, so this tab's own open request may not keep the press blocked.
+       */
+      const interrupt = pressing && action === 'pause' && pressKind.current !== 'pause'
+      const busy = state.action === 'busy' || (pressing && interrupt === false)
       const disabled = action === null && !busy
 
       const onClick = async () => {
@@ -242,7 +250,7 @@ window.__ModuleLoader__.load({
           // A restore in flight still answers the press that started it, so its request can sit open
           // for the whole restore. Pressing pause now means "stop that restore": drop this tab's wait
           // and let the new press interrupt the restore and keep the plan.
-          if (action !== 'pause') return
+          if (action !== 'pause' || pressKind.current === 'pause') return
           try {
             inflight.current.abort()
           } catch {}
@@ -253,6 +261,7 @@ window.__ModuleLoader__.load({
         const controller = typeof AbortController === 'function' ? new AbortController() : null
         const mine = pressToken.current + 1
         pressToken.current = mine
+        pressKind.current = action
         inflight.current = controller
         setPressing(true)
         try {
@@ -271,6 +280,7 @@ window.__ModuleLoader__.load({
         } finally {
           if (pressToken.current === mine) {
             inflight.current = null
+            pressKind.current = null
             if (mounted.current) setPressing(false)
           }
         }

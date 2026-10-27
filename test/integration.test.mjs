@@ -272,3 +272,30 @@ test('a real v4 heartbeat record is read by the resume loop without reviving idl
     cleanup()
   }
 })
+
+test('goal-only crash residue goes through the real plan reader and restores the goal alone', async () => {
+  const { dir, cleanup } = tempDir()
+  try {
+    // No session row at all: the dead process was only carrying an armed goal. The real probe must
+    // still turn that into a plan, and the engine must arm the goal without inventing a session.
+    const probe = harness()
+    probe.crashPlan = createProbe({}, {}).crashPlan
+    const store = createStore(dir, { log: () => {} })
+    const engine = createEngine({ store, probe, now: () => 1700000000000, bootId: 'boot-1', log: () => {} })
+    await engine.hydrate({ residue: { sessions: [], goals: [{ sessionId: 's2', goalId: 'g2', revision: 3 }], at: 9 } })
+
+    assert.notEqual(store.readPending(), null)
+    assert.deepEqual(store.readPending().sessions, [])
+    assert.deepEqual(store.readPending().goals, [{ sessionId: 's2', goalId: 'g2', revision: 3, armedRevision: 3, crash: true }])
+    assert.equal(engine.describe().action, 'resume')
+    assert.equal(engine.describe().counts.goals, 1)
+
+    const outcome = await engine.resume()
+    assert.equal(outcome.status, 'resumed')
+    assert.deepEqual(probe.calls.filter((call) => call[0] === 'session'), [])
+    assert.deepEqual(probe.calls.filter((call) => call[0] === 'goal').map((call) => call[1]), ['g2'])
+    assert.deepEqual(outcome.summary.failed, [])
+  } finally {
+    cleanup()
+  }
+})
