@@ -1,3 +1,32 @@
+## 0.5.0
+
+Restoring six long sessions at once also started six upstream model streams at once. The restore
+loop could not prevent that on its own: a session counts as started as soon as its turn opens, long
+before the provider answers. Restore is now progressive by default, and pausing during a restore is
+immediate instead of refused.
+
+* New `lib/gate.js`: one permit per real adapter request, held until that stream ends, fails or is
+  cancelled. The plugin installs an `llm/stream` middleware only while a restore runs, so ordinary
+  chatting never queues behind it. Compaction takes a permit from the same pool, and each official
+  retry takes a fresh one.
+* The pool starts at one request. Two clean streams raise it to two; two failures in a row drop it
+  back to one and close it for a cooldown, so a queue of sessions cannot hammer an unwell upstream.
+  An abandoned stream counts as neither success nor strike.
+* Restore starts are spaced by three seconds plus jitter, so a multi-session restore is a sequence
+  rather than a burst even before the first request is made.
+* Pressing pause while a restore is running interrupts it: dispatch stops, queued permits are
+  refused, the work that already started is stopped, un-restored rows stay in the plan as
+  outstanding continuations, and the answer is `paused` with `interrupted: true`. Late callbacks
+  from the interrupted round can no longer dispatch or consume the plan.
+* A session discovered while the probe is already stopping is persisted before it is cancelled, so
+  its continuation is not lost with the process.
+* `/state` carries the pool counters under `restore`; the button stays icon-only.
+* A job already `stopping` is no longer listed as work to pause: the press did not start that stop
+  and must not wait on it.
+* New coverage: permit accounting, health ramp, neutral cancellation, cooldown, interruptible
+  restore keeping its plan, no dispatch after the interrupt, and the guard being released on every
+  path.
+
 ## 0.4.15
 
 Two ways the crash reader could invent work that was not there, found while tracing the record a

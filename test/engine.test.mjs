@@ -1198,3 +1198,47 @@ test('a session that starts during the pause is continued with the captured turn
   assert.deepEqual(plan.stopped.discovered, ['s2'])
   assert.ok(plan.sessions.every((row) => row.epoch === 1))
 })
+
+test('pause() interrupts a running restore, keeps the plan and stops only what started', async () => {
+  const plan = {
+    version: 3, planId: 'p9', source: 'pause', status: 'paused',
+    sessions: [{ sessionId: 's1', running: true, lastTurn: 1 }, { sessionId: 's2', running: true, lastTurn: 1, parent: 's1' }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe()
+  const gate = {
+    guarded: 0, unguarded: 0, aborted: 0,
+    guard() { this.guarded += 1 },
+    unguard() { this.unguarded += 1 },
+    abort() { this.aborted += 1 },
+  }
+  let release = null
+  probe.restoreSession = async (session) => {
+    probe.calls.push(['session', session.sessionId])
+    if (session.sessionId === 's1') await new Promise((resolve) => { release = resolve })
+    return { status: 'restored', detail: 'attached' }
+  }
+  const engine = createEngine({ store, probe, now: () => 1700000000000, bootId: 'boot-1', gate, log: () => {} })
+  const running = engine.resume()
+  while (release === null) await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(engine.phase, 'resuming')
+
+  const outcome = await engine.pause()
+  assert.equal(outcome.status, 'paused')
+  assert.equal(outcome.interrupted, true)
+  assert.equal(gate.aborted, 1, 'queued model requests are refused before pause returns')
+  assert.equal(gate.guarded, 1)
+  assert.equal(engine.phase, 'paused')
+  assert.equal(store.state.plan?.status, 'paused')
+  assert.equal(store.state.plan?.sessions.length, 2, 'the undelivered session stays outstanding')
+  assert.equal(probe.calls.some((call) => call[0] === 'stop'), true, 'what did start is stopped')
+  assert.equal(engine.describe().action, 'resume')
+
+  release()
+  const settled = await running
+  assert.equal(settled.status, 'interrupted')
+  assert.equal(store.state.consumed, null, 'an interrupted restore never consumes the plan')
+  assert.equal(probe.calls.filter((call) => call[0] === 'session' && call[1] === 's2').length, 0, 'no dispatch after the interrupt')
+  assert.equal(gate.unguarded, 1)
+})

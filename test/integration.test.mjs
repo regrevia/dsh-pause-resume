@@ -240,7 +240,7 @@ test('a real v3 heartbeat record reaches the resume loop as a goal to re-arm', a
     await dead.flush()
     dead.stop()
     const raw = JSON.parse(fs.readFileSync(join(dir, 'running.json'), 'utf8'))
-    assert.equal(raw.version, 3)
+    assert.equal(raw.version, 4)
     assert.deepEqual(raw.goals, [{ sessionId: 's1', goalId: 'g1', revision: 4 }])
 
     // The next process reads that file before overwriting it and uses the real plan reader, so a

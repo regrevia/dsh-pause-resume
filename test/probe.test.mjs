@@ -58,6 +58,10 @@ function harness({ agents = [], goals = {}, jobs = {}, unownedJobs = [], keepRun
       },
       kill: (id, caller) => {
         calls.push(['jobs.kill', id, caller ?? null])
+        // A real kill only asks; the process exits later. The fake models the exit so the probe can
+        // prove it distinguishes "requested" from "terminated".
+        const rows = caller === undefined ? unownedJobs : jobs[caller] ?? []
+        for (const row of rows) if (row.id === id) row.status = 'killed'
       },
     },
     sessionController: {
@@ -112,17 +116,18 @@ test('live() reads the live registry, active goals and running jobs', () => {
       s2: { id: 'g2', revision: 2, phase: 'paused', activation: 'disarmed' },
     },
     jobs: { s1: [{ id: 'j1', status: 'running' }, { id: 'j2', status: 'done' }] },
-    unownedJobs: [{ id: 'j3', status: 'stopping' }],
+    unownedJobs: [{ id: 'j3', status: 'running' }, { id: 'j4', status: 'stopping' }],
   })
   const probe = createProbe(fake.registry)
   const live = probe.live()
   assert.equal(live.readable, true)
   assert.deepEqual(live.sessions, [
-    { sessionId: 's1', running: true, lastTurn: 3 },
-    { sessionId: 's2', running: false, lastTurn: 1 },
+    { sessionId: 's1', running: true, lastTurn: 3, parent: null, origin: 'root' },
+    { sessionId: 's2', running: false, lastTurn: 1, parent: null, origin: 'root' },
   ])
   // A paused goal is the person's pause, not this press's work.
   assert.deepEqual(live.goals, [{ sessionId: 's1', goalId: 'g1', revision: 4 }])
+  // A job already stopping is on its way out; the press did not start it and must not wait on it.
   assert.deepEqual(live.jobs.map((job) => job.id), ['j3', 'j1'])
 })
 
@@ -135,7 +140,7 @@ test('live() reads the agent inside a listed row, not the row own status', () =>
     },
   }))
   assert.equal(listRunning(registry({ agents: { list: () => [{ id: 's1', status: 'running', agent }] } })).length, 0)
-  assert.deepEqual(probe.live().sessions, [{ sessionId: 's1', running: false, lastTurn: 7 }])
+  assert.deepEqual(probe.live().sessions, [{ sessionId: 's1', running: false, lastTurn: 7, parent: null, origin: 'root' }])
 })
 
 test('live() reports an unreadable registry instead of claiming there is nothing to stop', () => {
@@ -165,7 +170,7 @@ test('stop() pauses goals with the real agent object and returns the bumped revi
   assert.deepEqual(order, ['goals.pause', 'cancel', 'jobs.kill'])
   assert.equal(a.status, 'idle')
   assert.deepEqual(stopped.stillRunning, [])
-  assert.deepEqual(stopped.sessions, [{ sessionId: 's1', lastTurn: 3 }])
+  assert.deepEqual(stopped.sessions, [{ sessionId: 's1', lastTurn: 3, parent: null, origin: 'root' }])
 })
 
 test('stop() waits for a stubborn turn and reports it instead of claiming it stopped', async () => {
@@ -242,15 +247,51 @@ test('restoreSession() keeps a session that failed to mount retryable', async ()
   assert.match(outcome.detail, /REMOTE_CONFLICT/u)
 })
 
-test('restoreSession() reports a subagent row as skipped, not as work a person must fix', async () => {
+test('restoreSession() keeps a subagent row without a known parent retryable', async () => {
   const failing = registry({
     agents: { get: () => undefined, list: () => [] },
     sessionController: { resolveAgent: async () => { throw new Error('session "s1" is owned by subagent routing') } },
   })
   const probe = createProbe(failing)
   const outcome = await probe.restoreSession({ sessionId: 's1', running: false }, { plan: { planId: 'p1' } })
-  assert.equal(outcome.status, 'skipped')
-  assert.match(outcome.detail, /parent restores it/u)
+  assert.equal(outcome.status, 'attention')
+  assert.match(outcome.detail, /parent route unavailable/u)
+})
+
+test('restoreSession() wakes a stopped child through subagents.prompt once its parent is live', async () => {
+  const parent = { id: 'p1', status: 'idle', phase: { lastTurn: 2 } }
+  const child = { id: 'c1', status: 'idle', phase: { lastTurn: 5 } }
+  const calls = []
+  const fake = registry({
+    agents: { get: (id) => (id === 'p1' ? parent : id === 'c1' ? child : undefined), list: () => [parent, child] },
+    subagents: {
+      prompt: async (request) => {
+        calls.push(request)
+        child.status = 'running'
+        child.phase.lastTurn += 1
+        return { accepted: true }
+      },
+    },
+  })
+  const probe = createProbe(fake, { settleMs: 200 })
+  const outcome = await probe.restoreSession({ sessionId: 'c1', parent: 'p1', origin: 'subagent', intent: 'continue', epoch: 1, lastTurn: 5 }, { plan: { planId: 'pause-9' } })
+  assert.equal(outcome.status, 'restored')
+  assert.equal(outcome.continued, true)
+  assert.deepEqual(calls.map((request) => [request.parentSessionId, request.childSessionId, request.mode, request.delivery, request.requestId]), [
+    ['p1', 'c1', 'continuable', 'queue', 'pause-9:continue:c1:1'],
+  ])
+})
+
+test('restoreSession() waits for the parent instead of dropping the child', async () => {
+  const calls = []
+  const probe = createProbe(registry({
+    agents: { get: () => undefined, list: () => [] },
+    subagents: { prompt: async (request) => { calls.push(request) } },
+  }))
+  const outcome = await probe.restoreSession({ sessionId: 'c1', parent: 'p1', origin: 'subagent', intent: 'continue', epoch: 1, lastTurn: 5 }, { plan: { planId: 'pause-9' } })
+  assert.equal(outcome.status, 'attention')
+  assert.match(outcome.detail, /parent is not live/u)
+  assert.equal(calls.length, 0)
 })
 
 test('a continuation that already moved the turn is not sent twice', async () => {
@@ -366,14 +407,30 @@ test('crashPlan() mounts what a dead process was running but never continues it'
   assert.equal(plan.source, 'crash')
   assert.equal(plan.planId, 'crash-1')
   assert.deepEqual(plan.sessions, [
-    { sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true },
-    { sessionId: 's2', intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true },
+    { sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null, parent: null, origin: 'root', crash: true },
+    { sessionId: 's2', intent: 'mount', epoch: 0, running: false, lastTurn: null, parent: null, origin: 'root', crash: true },
   ])
   assert.deepEqual(plan.goals, [])
-  assert.deepEqual(plan.attention, [{ kind: 'session', id: '', detail: 'crashed before it could be paused: sessions are reattached, their turns are not re-sent' }])
+  assert.deepEqual(plan.attention, [{ kind: 'session', id: '', detail: 'crashed before it could be paused: 2 session(s) reattached without re-sending a turn' }])
   assert.equal(plan.crashes, 2)
   assert.equal(probe.crashPlan(null), null)
   assert.equal(probe.crashPlan({ sessions: [] }), null)
+})
+
+test('crashPlan() continues the turn the dead process left open and only mounts a finished one', () => {
+  const open = { id: 's1', status: 'idle', phase: { lastTurn: 4 } }
+  const done = { id: 's2', status: 'idle', phase: { lastTurn: 9 } }
+  const fake = registry({ agents: { get: (id) => (id === 's1' ? open : id === 's2' ? done : undefined), list: () => [open, done] } })
+  const plan = createProbe(fake).crashPlan({
+    sessions: [{ sessionId: 's1', lastTurn: 4 }, { sessionId: 's2', lastTurn: 7 }, { sessionId: 's3', lastTurn: null }],
+    at: 1700000000000,
+  }, { planId: 'crash-3' })
+  assert.deepEqual(plan.sessions.map((row) => [row.sessionId, row.intent, row.lastTurn]), [
+    ['s1', 'continue', 4],
+    ['s2', 'mount', 7],
+    ['s3', 'mount', null],
+  ])
+  assert.equal(plan.crashes, 3)
 })
 
 test('crashPlan() carries armed goals over without faking a pause', () => {
@@ -444,13 +501,14 @@ test('listResidue() records the open turns and the armed goals, and nothing else
     },
   })
   assert.deepEqual(listResidue(fake.registry), {
-    sessions: ['a'],
+    readable: true,
+    sessions: [{ sessionId: 'a', lastTurn: 1 }],
     goals: [
       { sessionId: 'a', goalId: 'ga', revision: 3 },
       { sessionId: 'b', goalId: 'gb', revision: 8 },
     ],
   })
-  assert.deepEqual(listResidue(registry({})), { sessions: [], goals: [] })
+  assert.deepEqual(listResidue(registry({})), { sessions: [], goals: [], readable: false })
 })
 
 test('listResidue() skips paused, disarmed and unreadable goals', () => {
@@ -470,7 +528,7 @@ test('listResidue() skips paused, disarmed and unreadable goals', () => {
     if (agent?.id === 'c') throw new Error('GOAL_READ_FAILED')
     return original(agent)
   }
-  assert.deepEqual(listResidue(fake.registry), { sessions: [], goals: [] })
+  assert.deepEqual(listResidue(fake.registry), { sessions: [], goals: [], readable: false })
 })
 
 test('listRunning() names exactly the sessions whose turn is open', () => {
@@ -710,7 +768,7 @@ test('stop() cancels a turn that started after the capture and returns it as dis
     jobs: [],
   })
   assert.deepEqual([...stopped.canceled].sort(), ['s1', 's2'])
-  assert.deepEqual(stopped.discovered, [{ sessionId: 's2', lastTurn: 0 }])
+  assert.deepEqual(stopped.discovered, [{ sessionId: 's2', lastTurn: 0, parent: null, origin: 'root' }])
   assert.equal(stopped.sessions.find((row) => row.sessionId === 's2').lastTurn, 1)
   assert.deepEqual(stopped.stillRunning, [])
 })

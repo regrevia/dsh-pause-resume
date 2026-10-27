@@ -6,6 +6,7 @@ import { createEngine } from './lib/engine.js'
 import { nextEpoch, currentEpoch, dropEpoch } from './lib/epoch.js'
 import { createHeartbeat } from './lib/heartbeat.js'
 import { createProbe, listResidue } from './lib/probe.js'
+import { createGate } from './lib/gate.js'
 
 export const name = 'dsh-pause-resume'
 
@@ -229,12 +230,27 @@ export function apply(ctx, config = {}) {
     listRunning: () => listResidue(ctx),
     log,
   })
+  let engineRef = null
   const probe = createProbe(ctx, {
     isCurrent: () => currentEpoch() === epoch,
+    // Reached only for rows discovered after the capture: the plan must hold them before the probe
+    // cancels them, and the engine owns the plan.
+    beforeCancel: (rows) => engineRef?.noteDiscovered(rows),
     graceMs: Number.isFinite(config?.graceMs) ? config.graceMs : 2000,
     continueText: typeof config?.continueText === 'string' ? config.continueText : undefined,
   })
   const epoch = nextEpoch()
+  /**
+   * Progressive restore: the gate is what actually limits provider requests. The restore loop can
+   * only limit dispatch, and a session counts as started as soon as its turn opens — the upstream
+   * stream may begin seconds later, and compaction and retries add requests the loop never sees.
+   */
+  const gate = createGate({
+    capacity: Number.isFinite(config?.restoreCapacity) ? config.restoreCapacity : 1,
+    maxCapacity: Number.isFinite(config?.restoreMaxCapacity) ? config.restoreMaxCapacity : 2,
+    cooldownMs: Number.isFinite(config?.restoreCooldownMs) ? config.restoreCooldownMs : 40000,
+    log,
+  })
   const engine = createEngine({
     store,
     probe,
@@ -242,13 +258,22 @@ export function apply(ctx, config = {}) {
     epoch,
     bootId: bootId(),
     graceMs: Number.isFinite(config?.graceMs) ? config.graceMs : 2000,
+    gate,
+    startGapMs: Number.isFinite(config?.restoreStartGapMs) ? config.restoreStartGapMs : 3000,
     log,
   })
+  engineRef = engine
 
   let disposed = false
   let disposeRoutes = () => {}
+  let disposeStream = () => {}
   const cleanup = () => {
     disposed = true
+    try {
+      disposeStream()
+    } catch {
+      /* the listener may already be gone */
+    }
     // The in-flight press, if any, checks this and refuses to write its stale result.
     dropEpoch(epoch)
     try {
@@ -256,6 +281,48 @@ export function apply(ctx, config = {}) {
     } catch {}
     // A reload is not a crash: keep the heartbeat's last write as evidence, but let go of timers.
     heartbeat.stop()
+  }
+
+  /**
+   * The permit is held for the whole stream, not for admission: releasing at "accepted" or at the
+   * first token would let six sessions pile six upstream requests onto the gateway while each is
+   * still waiting for its answer. A terminal finish chunk is the only proof a request is over.
+   */
+  if (typeof ctx.on === 'function') {
+    try {
+      const off = ctx.on('llm/stream', (options, next) => {
+        if (gate.enabled() === false) return next()
+        if (typeof options?.sessionId !== 'string') return next()
+        return (async function* limited() {
+          const ticket = await gate.acquire({
+            sessionId: options.sessionId,
+            purpose: options.purpose,
+            provider: options.provider,
+            model: options.model,
+          })
+          let ended = false
+          let healthy = false
+          try {
+            for await (const chunk of next()) {
+              if (chunk?.type === 'finish') {
+                const kind = chunk?.reason?.kind
+                healthy = kind !== 'error' && kind !== 'aborted'
+              }
+              yield chunk
+            }
+            ended = true
+          } finally {
+            // A consumer that walks away mid-stream (pause, abort, a cancelled turn) is not an
+            // upstream failure: release without a strike, or the gate would cool down because the
+            // person pressed pause.
+            gate.release(ticket, ended ? (healthy ? 'ok' : 'error') : 'cancelled')
+          }
+        })()
+      })
+      if (typeof off === 'function') disposeStream = off
+    } catch (error) {
+      log(`cannot install the restore gate: ${error?.message ?? error}`)
+    }
   }
 
   if (typeof ctx.effect === 'function') ctx.effect(() => cleanup)

@@ -67,20 +67,66 @@ The same process reloading the plugin (hot reload) sees its own id and knows the
 restore. A `pausing` plan found on disk means the press itself was interrupted: those sessions are
 mounted but never continued, and the button carries a dot until a person presses restore.
 
+## Progressive restore
+
+Six long sessions restored at once are six upstream model requests at once, and a gateway that is
+happy with one slow stream is often unhappy with six. Restore is therefore staged by default. Two
+layers, because either alone is enough to defeat the other:
+
+* **Dispatch spacing.** Sessions are restored in waves by lineage depth, with a gap of
+  `restoreStartGapMs` (3 s) plus up to 0.4 s jitter between starts.
+* **A real request pool.** The plugin registers an `llm/stream` middleware and holds one permit per
+  adapter request until that stream ends, fails or is cancelled — not when the turn opens, not when
+  the first chunk arrives, and not when a tool or subagent wait begins (that request is over).
+  Compaction enters the same pool with `purpose: 'compaction'`, and every official retry takes a
+  fresh permit. The guard is open only while a restore runs, so ordinary chatting is never queued
+  behind it.
+
+The pool starts at `restoreCapacity` (1). Two clean streams in a row raise it by one, up to
+`restoreMaxCapacity` (2). Two failures in a row drop it back to one and close the pool for
+`restoreCooldownMs` (40 s), so one unwell upstream cannot be hammered by a queue of sessions. An
+abandoned stream (the person paused) is neither a success nor a strike: cancelling is cheap.
+
+Pausing while a restore is running is immediate. The press stops dispatching, refuses every request
+still waiting for a permit, asks the Harness to stop the work that already started, writes what is
+left back to the plan as an outstanding continuation, and returns `paused` with
+`interrupted: true`. The next press resumes the same plan; the continuation request id is per cycle,
+so a message already admitted is deduplicated instead of sent twice.
+
+`/state` reports the queue while a plan exists: `{enabled, capacity, running, queued, dispatched,
+failed, interrupted, cooldownUntil}` under `restore`. The button itself stays icon-only.
+
+Configuration (all optional):
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `restoreCapacity` | `1` | model requests allowed when a restore starts |
+| `restoreMaxCapacity` | `2` | ceiling the health gate may raise the limit to |
+| `restoreCooldownMs` | `40000` | pause after two consecutive failures across sessions |
+| `restoreStartGapMs` | `3000` | spacing between restore starts, plus jitter |
+
+Scope, stated honestly: this governs requests that pass through this Host's model stack. The
+Harness's own restore flow and a subagent that reaches a provider outside this Host are outside the
+pool, and no plugin can promise a concurrency limit for a company gateway it does not own. The
+300 s upstream idle timeout is an upstream decision; progressive restore cannot pretend to fix it,
+but it makes the restore produce evidence (one session, one exact request) instead of an avalanche.
+
 ## Installing
 
 ```bash
 plugin_manager install_bundle dsh-pause-resume
 ```
 
-or install the bundle from the Harness plugin manager with the package name. The plugin needs no
-configuration and holds no credentials. `allowRemote` exists for a Harness reached from another
+or install the bundle from the Harness plugin manager with the package name. Every configuration
+key is optional (see Progressive restore) and the plugin holds no credentials. `allowRemote` exists for a Harness reached from another
 machine; local-only is the default.
 
 ## Guarantees and limits
 
 * **Exclusive.** The phase lives on the Host and is written before any work starts, so two windows,
-  a double press and a tool call cannot overlap. The second caller is told `busy`.
+  a double press and a tool call cannot overlap. The second caller is told `busy` — except a pause
+  during a restore, which interrupts it on the spot instead of refusing: stopping must never be the
+  operation that waits.
 * **Durable before destructive.** No turn is cancelled until the plan is on disk. A failed write means
   nothing was stopped.
 * **Idempotent.** The continuation request id is derived from the plan and the session, so a retry
