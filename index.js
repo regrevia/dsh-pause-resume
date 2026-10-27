@@ -236,6 +236,14 @@ export function apply(ctx, config = {}) {
     // Reached only for rows discovered after the capture: the plan must hold them before the probe
     // cancels them, and the engine owns the plan.
     beforeCancel: (rows) => engineRef?.noteDiscovered(rows),
+    // Turn boundaries are published for every session on one dispatch. The probe filters by id and
+    // drops the listener when its bounded watch ends, so listeners never accumulate across presses.
+    watchTurn: (sessionId, onEvent) => ctx.on('session/event', (session, event) => {
+      if (session?.id === sessionId) onEvent(event)
+    }),
+    // Persisted before the admitted continuation is waited on: a crash in that gap must not resend
+    // the message, and must not lose it either.
+    onAdmitted: (sessionId, requestId) => engineRef?.recordAdmission(sessionId, requestId) !== false,
     graceMs: Number.isFinite(config?.graceMs) ? config.graceMs : 2000,
     continueText: typeof config?.continueText === 'string' ? config.continueText : undefined,
   })

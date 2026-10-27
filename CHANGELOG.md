@@ -1,3 +1,9 @@
+## 0.6.0
+
+- A restore intent is read back exactly as it was declared: `unknown` and `skip` survive every read, a declared intent outranks the old `running` flag, and a cold restore no longer mounts a session whose plan said it had nothing to prove.
+- Whether a continuation finished is decided from the turn boundary (`turn/start`, `turn/end`, the open turn start) instead of the phase counter, and the admitted request id is written to its row before the turn is waited on. A turn that already ended is skipped, an open one is reported restored, and a message admitted just before a restart is waited for instead of being sent a second time.
+- Sessions discovered mid-pause are written into the plan before they are stopped. A plan that cannot be written leaves those sessions running and says so, instead of cancelling work it cannot name.
+
 ## 0.5.12
 
 - The page that started a restore can now stop it: while the Host reports `pause` (a restore is running), the glyph is the pause button again and pressing it aborts this tab's own open request and interrupts the restore, leaving the plan retryable. A pause press in flight is still never interrupted by pressing pause again, and a resume press still spins until the Host stops calling it resuming.

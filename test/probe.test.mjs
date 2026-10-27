@@ -993,3 +993,121 @@ test('an unknown row attaches for inspection but never continues', async () => {
   assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
   assert.equal(fake.calls.some((call) => call[0] === 'resolveAgent'), true)
 })
+
+/**
+ * A session whose turn boundary is readable, like the shipped projection. `state` is the live
+ * projection: it is what the probe must trust, not the phase counter that a restart rewinds.
+ */
+function turnRig({ lastTurn = 6, open = false, status = 'idle' } = {}) {
+  const fake = harness({ agents: [{ id: 's1', status, phase: { lastTurn }, session: { id: 's1' } }] })
+  const state = { lastTurn, openTurnStartSeq: open ? 1 : null }
+  fake.services.sessionProjections = {
+    stateOf: (session, key) => (key === 'turnBoundary' ? state : undefined),
+  }
+  const handlers = new Map()
+  const watchTurn = (sessionId, onEvent) => {
+    handlers.set(sessionId, onEvent)
+    return () => handlers.delete(sessionId)
+  }
+  return { fake, state, watchTurn }
+}
+
+test('a continuation that opened its turn is restored with the turn it left behind', async () => {
+  const rig = turnRig({ lastTurn: 6 })
+  rig.fake.services.sessionController.prompt = async (request) => {
+    rig.fake.calls.push(['prompt', request.requestId])
+    const agent = rig.fake.live.get('s1')
+    agent.status = 'running'
+    agent.phase.lastTurn = 7
+    rig.state.lastTurn = 7
+    rig.state.openTurnStartSeq = 4
+    return { accepted: true }
+  }
+  const probe = createProbe(rig.fake.registry, { settleMs: 400, watchTurn: rig.watchTurn })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 6 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'restored')
+  assert.equal(outcome.continued, true)
+  assert.equal(outcome.turn, 7)
+  assert.equal(rig.fake.calls.filter((call) => call[0] === 'prompt').length, 1)
+})
+
+test('an admitted turn that made no progress is unknown, not attention and not pressed twice', async () => {
+  const rig = turnRig({ lastTurn: 6 })
+  // `session.lastTurn` is the plan's pre-press baseline: the poll sees the same turn still idle.
+  rig.fake.services.sessionController.prompt = async (request) => {
+    rig.fake.calls.push(['prompt', request.requestId])
+    return { accepted: true }
+  }
+  const probe = createProbe(rig.fake.registry, { settleMs: 60, watchTurn: rig.watchTurn })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 6 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'unknown')
+  assert.match(outcome.detail, /no turn started/)
+  assert.equal(rig.fake.calls.filter((call) => call[0] === 'prompt').length, 1)
+})
+
+test('a continuation already admitted before the restart is waited for, never sent again', async () => {
+  const rig = turnRig({ lastTurn: 6 })
+  const probe = createProbe(rig.fake.registry, { settleMs: 60, watchTurn: rig.watchTurn })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 6, admittedRequest: 'continue:p1:s1:1:0' },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'unknown')
+  assert.match(outcome.detail, /admitted before this restart/)
+  assert.equal(rig.fake.calls.some((call) => call[0] === 'prompt'), false)
+})
+
+test('an admitted continuation whose record cannot be saved is held instead of pressed on', async () => {
+  const rig = turnRig({ lastTurn: 6 })
+  rig.fake.services.sessionController.prompt = async (request) => {
+    rig.fake.calls.push(['prompt', request.requestId])
+    return { accepted: true }
+  }
+  const probe = createProbe(rig.fake.registry, {
+    settleMs: 400,
+    watchTurn: rig.watchTurn,
+    onAdmitted: () => false,
+  })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 6 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'unknown')
+  assert.match(outcome.detail, /could not be saved/)
+  assert.equal(rig.fake.calls.filter((call) => call[0] === 'prompt').length, 1)
+})
+
+test('a turn that already ended before the restart is skipped, so it is not started twice', async () => {
+  const rig = turnRig({ lastTurn: 7 })
+  const probe = createProbe(rig.fake.registry, { settleMs: 60, watchTurn: rig.watchTurn })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 7, continuedTurn: 7 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'skipped')
+  assert.equal(outcome.continued, true)
+  assert.deepEqual(rig.fake.calls, [])
+})
+
+test('a crash plan reads an open turn as owed and a closed one as finished', () => {
+  const cases = [
+    { lastTurn: 7, open: false, expected: 'skip' },
+    { lastTurn: 7, open: true, expected: 'continue' },
+    { lastTurn: 9, open: false, expected: 'skip' },
+  ]
+  for (const item of cases) {
+    const rig = turnRig({ lastTurn: item.lastTurn, open: item.open, status: item.open ? 'running' : 'idle' })
+    const probe = createProbe(rig.fake.registry, { settleMs: 0, watchTurn: rig.watchTurn })
+    const plan = probe.crashPlan(
+      { at: 1700, sessions: [{ sessionId: 's1', lastTurn: 7 }] },
+      { planId: 'crash-1700-1' },
+    )
+    assert.equal(plan.sessions[0].intent, item.expected, `lastTurn ${item.lastTurn} open ${item.open}`)
+  }
+})

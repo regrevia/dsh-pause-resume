@@ -1482,3 +1482,42 @@ test('a crash session and its goal are attached and re-armed by a resume', async
   assert.ok(outcome.summary.restored.some((row) => /g2/u.test(row)))
   assert.equal(store.state.plan, null)
 })
+
+test('a continuation is written to its row before anything waits for its turn', async () => {
+  const store = fakeStore({
+    plan: {
+      version: 3, planId: 'p1', status: 'paused', source: 'pause',
+      sessions: [{ sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 3, running: true }],
+      goals: [], jobs: [],
+    },
+  })
+  const { engine } = engineFor({ store })
+  await engine.hydrate({ residue: null })
+  assert.equal(engine.recordAdmission('s1', 'continue:p1:s1:1:0'), true)
+  assert.equal(store.state.plan.sessions[0].admittedRequest, 'continue:p1:s1:1:0')
+  // A row this plan does not name cannot be acknowledged, and saying otherwise would let the probe
+  // press a continuation it can never account for.
+  assert.equal(engine.recordAdmission('s9', 'continue:p1:s9:1:0'), false)
+  store.state.failWrite = true
+  assert.equal(engine.recordAdmission('s1', 'continue:p1:s1:1:1'), false)
+})
+
+test('sessions found during a pause are in the plan before anything stops them', async () => {
+  const store = fakeStore({
+    plan: {
+      version: 3, planId: 'p1', status: 'pausing', source: 'pause',
+      sessions: [{ sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 3, running: true }],
+      goals: [], jobs: [],
+    },
+  })
+  const { engine } = engineFor({ store })
+  await engine.hydrate({ residue: null })
+  assert.equal(engine.noteDiscovered([{ sessionId: 's2', lastTurn: 4 }, { sessionId: 's1', lastTurn: 3 }, { bogus: true }]), true)
+  const rows = store.state.plan.sessions
+  assert.deepEqual(rows.map((row) => [row.sessionId, row.intent, row.lastTurn]), [['s1', 'continue', 3], ['s2', 'continue', 4]])
+  assert.equal(store.state.plan.sessions[1].running, true)
+  // Nothing may be stopped on a plan that could not hold it.
+  store.state.failWrite = true
+  assert.equal(engine.noteDiscovered([{ sessionId: 's3', lastTurn: 1 }]), false)
+  assert.equal(store.state.plan.sessions.some((row) => row.sessionId === 's3'), false)
+})
