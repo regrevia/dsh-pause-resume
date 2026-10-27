@@ -539,6 +539,38 @@ test('stop() bounds a cancel that never answers instead of pinning the press for
   assert.deepEqual(stopped.stillRunning, ['s1'])
 })
 
+test('stop() stops touching live work once a reload owns the plan', async () => {
+  const agents = new Map([
+    ['s1', { id: 's1', status: 'running', phase: { lastTurn: 0 } }],
+    ['s2', { id: 's2', status: 'idle', phase: { lastTurn: 0 } }],
+  ])
+  const canceled = []
+  let current = true
+  const services = {
+    agents: { get: (id) => agents.get(id), list: () => [...agents.values()] },
+    jobs: { list: () => [], kill: () => { if (current === false) throw new Error('kill after reload') } },
+    sessionController: {
+      cancel: async ({ sessionId }) => {
+        canceled.push(sessionId)
+        const agent = agents.get(sessionId)
+        agent.status = 'idle'
+        agent.phase.lastTurn += 1
+        // The first cancel is in flight when the plugin reloads and a new instance takes the plan.
+        current = false
+        // New work the next instance is already running: cancelling it would be a pause nobody asked
+        // for in this process, so it must stay untouched.
+        agents.get('s2').status = 'running'
+      },
+    },
+  }
+  const probe = createProbe(registry(services), { graceMs: 300, isCurrent: () => current })
+  const stopped = await probe.stop(probe.live())
+  assert.equal(stopped.reloaded, true)
+  assert.deepEqual(canceled, ['s1'])
+  assert.deepEqual(stopped.sessions, [])
+  assert.equal(agents.get('s2').status, 'running')
+})
+
 test('stop() reports a missing cancel or kill service instead of claiming success', async () => {
   const agent = { id: 's1', status: 'running', phase: { lastTurn: 0 } }
   const services = { agents: { get: () => agent, list: () => [agent] } }

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.10
+
+A plugin reload during a pause could keep cancelling turns and jobs that the next instance had
+already captured, stopping work that no press in that process asked to stop.
+
+* A stop now checks ownership before every cancel round, before each goal pause and each job
+  kill, and once more before it reads the post-stop turn baselines. If a newer instance owns
+  the plan, the stop returns with no rows and the engine discards the result instead of writing
+  a plan over the new one. A regression test drives a reload from inside an in-flight cancel and
+  asserts the newly started work is left running.
+
 ## 0.4.9
 
 A pause could report "paused" while work it had not captured was still starting, and two disk
