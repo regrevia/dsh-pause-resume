@@ -198,7 +198,7 @@ test('restoreSession() mounts an idle session and does not invent a turn', async
   const fake = harness({ agents: [] })
   const probe = createProbe(fake.registry)
   const outcome = await probe.restoreSession({ sessionId: 's9', running: false }, { plan: { planId: 'p1' } })
-  assert.deepEqual(outcome, { status: 'restored', detail: 'attached', continued: false })
+  assert.deepEqual(outcome, { status: 'restored', detail: 'attached', continued: false, turn: 0 })
   assert.deepEqual(fake.calls.filter((call) => call[0] === 'resolveAgent'), [['resolveAgent', 's9']])
   assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
 })
@@ -225,14 +225,48 @@ test('a pre-epoch plan keeps its legacy continuation id through an upgrade', asy
   assert.equal(prompt[2], 'pause-1:continue:s1')
 })
 
-test('restoreSession() does not resend after a turn already advanced', async () => {
+test('restoreSession() does not resend when a turn advanced without this plan admitting it', async () => {
   const fake = harness({ agents: [{ id: 's1', status: 'idle', phase: { lastTurn: 9 } }] })
   const probe = createProbe(fake.registry)
   const outcome = await probe.restoreSession({ sessionId: 's1', running: true, lastTurn: 4 }, { plan: { planId: 'p1' } })
-  // A turn number past the baseline can mean the continuation ran, or that a turn was interrupted
-  // after admission. Neither allows a resend, and neither is a clean skip: it needs a look.
-  assert.equal(outcome.status, 'attention')
-  assert.match(outcome.detail, /not sent again/u)
+  // A turn number past the baseline can mean the continuation ran, or that an unrelated round did.
+  // It must not be sent again, and lack of proof must not close the plan either.
+  assert.equal(outcome.status, 'unknown')
+  assert.equal(outcome.continued, false)
+  assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
+})
+
+test('restoreSession() treats the turn this plan admitted as the baseline after a crash', async () => {
+  const fake = harness({ agents: [{ id: 's1', status: 'idle', phase: { lastTurn: 5 } }] })
+  const probe = createProbe(fake.registry)
+  // The plan admitted turn 4 before the crash and the turn ended at 5: the work came back.
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'continue', epoch: 1, running: true, lastTurn: 4, continuedTurn: 4 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'restored')
+  assert.equal(outcome.continued, true)
+  assert.equal(outcome.turn, 5)
+  assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
+})
+
+test('restoreSession() keeps unknown state off the wire and out of terminal results', async () => {
+  const fake = harness({ agents: [{ id: 's1', status: 'idle', phase: { lastTurn: 2 } }] })
+  const probe = createProbe(fake.registry)
+  const outcome = await probe.restoreSession({ sessionId: 's1', intent: 'unknown', epoch: 0, running: false }, { plan: { planId: 'p1' } })
+  assert.equal(outcome.status, 'unknown')
+  assert.equal(outcome.continued, false)
+  assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
+  assert.equal(fake.calls.some((call) => call[0] === 'resolveAgent'), false)
+})
+
+test('restoreSession() stops before admitting when the restore was cancelled', async () => {
+  const fake = harness({ agents: [{ id: 's1', status: 'idle', phase: { lastTurn: 4 } }] })
+  const probe = createProbe(fake.registry)
+  const controller = new AbortController()
+  controller.abort()
+  const outcome = await probe.restoreSession({ sessionId: 's1', running: true, lastTurn: 4 }, { plan: { planId: 'p1' }, signal: controller.signal })
+  assert.equal(outcome.status, 'interrupted')
   assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
 })
 
@@ -412,18 +446,20 @@ test('crashPlan() records what a dead process carried without inventing a turn f
   const plan = probe.crashPlan({ sessions: [{ sessionId: 's1' }, { sessionId: 's2' }], at: 1700000000000 }, { planId: 'crash-1' })
   assert.equal(plan.source, 'crash')
   assert.equal(plan.planId, 'crash-1')
+  // No live agent and no saved turn: two sessions whose state cannot be proven. They are kept as
+  // `unknown`, never turned into a mount-only row that the restore would silently skip.
   assert.deepEqual(plan.sessions, [
-    { sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null, parent: null, origin: 'root', crash: true },
-    { sessionId: 's2', intent: 'mount', epoch: 0, running: false, lastTurn: null, parent: null, origin: 'root', crash: true },
+    { sessionId: 's1', intent: 'unknown', epoch: 0, running: false, lastTurn: null, parent: null, origin: 'root', crash: true },
+    { sessionId: 's2', intent: 'unknown', epoch: 0, running: false, lastTurn: null, parent: null, origin: 'root', crash: true },
   ])
   assert.deepEqual(plan.goals, [])
-  assert.deepEqual(plan.attention, [{ kind: 'session', id: '', detail: 'crashed before it could be paused: 2 session(s) left alone' }])
+  assert.deepEqual(plan.attention, [{ kind: 'session', id: '', detail: 'crashed: 2 session(s) need a look before continuing' }])
   assert.equal(plan.crashes, 2)
   assert.equal(probe.crashPlan(null), null)
   assert.equal(probe.crashPlan({ sessions: [] }), null)
 })
 
-test('crashPlan() continues the turn the dead process left open and only mounts a finished one', () => {
+test('crashPlan() continues the open turn and marks a finished or unprovable one apart', () => {
   const open = { id: 's1', status: 'idle', phase: { lastTurn: 4 } }
   const done = { id: 's2', status: 'idle', phase: { lastTurn: 9 } }
   const fake = registry({ agents: { get: (id) => (id === 's1' ? open : id === 's2' ? done : undefined), list: () => [open, done] } })
@@ -433,10 +469,22 @@ test('crashPlan() continues the turn the dead process left open and only mounts 
   }, { planId: 'crash-3' })
   assert.deepEqual(plan.sessions.map((row) => [row.sessionId, row.intent, row.lastTurn]), [
     ['s1', 'continue', 4],
-    ['s2', 'mount', 7],
-    ['s3', 'mount', null],
+    ['s2', 'skip', 7],
+    ['s3', 'unknown', null],
   ])
   assert.equal(plan.crashes, 3)
+})
+
+test('lastTurnOf reads the open turn of a running phase', async () => {
+  // The shipped loop keeps the open turn in `phase.turn` while running and in `phase.lastTurn` when
+  // idle. Reading only the idle field recorded null for every session that was actually mid-turn.
+  const running = { id: 's1', status: 'running', phase: { kind: 'running', turn: 9, step: 0 } }
+  const fake = harness({ agents: [running] })
+  const probe = createProbe(fake.registry)
+  const plan = probe.crashPlan({ sessions: [{ sessionId: 's1' }] }, { planId: 'crash-1' })
+  // A running agent cannot prove the turn is still open, so it is unknown rather than lost.
+  assert.equal(plan.sessions[0].lastTurn, null)
+  assert.equal(plan.sessions[0].intent, 'unknown')
 })
 
 test('crashPlan() carries armed goals over without faking a pause', () => {
