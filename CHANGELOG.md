@@ -1,3 +1,7 @@
+## 0.5.11
+
+- The continuation message now names the background jobs this pause stopped and asks for them to be restarted, so a continued turn puts that work back itself. A job cannot be replayed by the host: a job is a live process, and starting one needs the closure that produced it.
+
 ## 0.5.10
 
 - When a crash plan is re-derived, a row the current residue no longer names keeps its mount-only form and its attention line instead of disappearing from the plan.

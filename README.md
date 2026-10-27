@@ -18,7 +18,7 @@ a person to look at, the one-sentence tooltip says so and the button still offer
 | A session with an unfinished turn | turn cancelled, session recorded | session mounted, then one visible continuation message |
 | A goal that was armed | paused with the revision it had | `goals.resume` with that exact revision; the goal driver continues on its own |
 | A session that only carried that goal | recorded, nothing stopped | mounted; the resumed goal takes over |
-| A running background job | killed and recorded | recorded only: a job is a live process, not replayable |
+| A running background job | killed and recorded | recorded only: a job is a live process, not replayable, so the continuation message names it and the turn restarts it if the work still needs it |
 | A session that ended normally | untouched | untouched, and never recorded in the first place |
 | A terminal / finished session | untouched | untouched |
 | A schedule | untouched | untouched |

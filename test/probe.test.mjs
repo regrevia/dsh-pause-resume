@@ -214,6 +214,17 @@ test('restoreSession() continues a stopped turn with one visible, idempotent mes
   assert.equal(agent.status, 'running')
 })
 
+test('restoreSession() tells the continued turn which pause-stopped jobs it owns', async () => {
+  const agent = { id: 's1', status: 'idle', phase: { lastTurn: 4 } }
+  const fake = harness({ agents: [agent] })
+  const probe = createProbe(fake.registry, { continueText: '接着来' })
+  const plan = { planId: 'p', jobs: [{ id: 'j1', owner: 's1' }, { id: 'j2', owner: 's2' }] }
+  const outcome = await probe.restoreSession({ sessionId: 's1', running: true, lastTurn: 4 }, { plan })
+  assert.equal(outcome.continued, true)
+  const prompt = fake.calls.find((call) => call[0] === 'prompt')
+  assert.equal(prompt[4], '接着来（暂停时停止了后台任务 j1；还需要的话请重新启动）')
+})
+
 test('a pre-epoch plan keeps its legacy continuation id through an upgrade', async () => {
   const agent = { id: 's1', status: 'idle', phase: { lastTurn: 4 } }
   const fake = harness({ agents: [agent] })
