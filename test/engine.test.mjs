@@ -37,9 +37,14 @@ function fakeStore({ plan = null, journal = [], failWrite = false, failWriteAfte
     },
     lastRestore: () => state.result,
     readJournal: () => new Map([...state.journal.entries()]),
-    appendJournal: (planId, key, status, boot) => {
+    appendJournal: (planId, key, status, boot, extra = null) => {
       if (state.failJournal === true) return false
-      state.journal.set(key, { status, boot })
+      state.journal.set(key, {
+        status,
+        boot,
+        epoch: Number.isSafeInteger(extra?.epoch) ? extra.epoch : undefined,
+        turn: Number.isSafeInteger(extra?.turn) ? extra.turn : undefined,
+      })
       return true
     },
     clearJournal: () => {
@@ -1520,4 +1525,87 @@ test('sessions found during a pause are in the plan before anything stops them',
   store.state.failWrite = true
   assert.equal(engine.noteDiscovered([{ sessionId: 's3', lastTurn: 1 }]), false)
   assert.equal(store.state.plan.sessions.some((row) => row.sessionId === 's3'), false)
+})
+
+
+test('a pause during a restore gives a restored session a new cycle only while its turn still runs', async () => {
+  const plan = {
+    version: 3, planId: 'p12', source: 'pause', status: 'paused',
+    sessions: [
+      { sessionId: 's1', running: true, lastTurn: 5, epoch: 2, admittedRequest: 'req-a', admittedEpoch: 2 },
+      { sessionId: 's2', running: true, lastTurn: 4, epoch: 2, admittedRequest: 'req-b', admittedEpoch: 2 },
+      { sessionId: 's3', running: true, lastTurn: 5, epoch: 2, admittedRequest: 'req-c', admittedEpoch: 2 },
+    ],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  // s1 was restored by this boot and its turn was still running when the pause was pressed.
+  store.state.journal.set('s:s1', { status: 'restored', boot: 'boot-1', epoch: 2, turn: 5 })
+  // s3 was restored by this boot and its turn had already ended: nothing is owed any more.
+  store.state.journal.set('s:s3', { status: 'restored', boot: 'boot-1', epoch: 2, turn: 5 })
+  const probe = fakeProbe(
+    { sessions: [{ sessionId: 's1', running: true, lastTurn: 5 }], goals: [], jobs: [], readable: true },
+    { sessions: [{ sessionId: 's1', lastTurn: 5 }, { sessionId: 's2', lastTurn: 5 }, { sessionId: 's3', lastTurn: 5 }] },
+  )
+  let release = null
+  probe.restoreSession = async (session) => {
+    probe.calls.push(['session', session.sessionId])
+    if (session.sessionId === 's2') await new Promise((resolve) => { release = resolve })
+    return { status: 'restored', detail: 'attached', turn: 6 }
+  }
+  const engine = createEngine({ store, probe, now: () => 1700000000000, bootId: 'boot-1', log: () => {} })
+  const running = engine.resume()
+  while (release === null) await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const outcome = await engine.pause()
+  assert.equal(outcome.interrupted, true)
+  const rows = new Map(store.state.plan.sessions.map((row) => [row.sessionId, row]))
+  assert.equal(rows.get('s1').intent, 'continue', 'a turn cut short still owes its continuation')
+  assert.equal(rows.get('s1').epoch, 3, 'the next cycle cannot reuse the request id the old turn consumed')
+  assert.equal(rows.get('s1').admittedRequest, undefined, 'an admission consumed by a turn is not waited for again')
+  assert.equal(rows.get('s2').intent, 'continue', 'the row that never started stays owed')
+  assert.equal(rows.get('s2').epoch, 3, 'its turn advanced while the restore ran, so this is a new cycle')
+  assert.equal(rows.get('s3').intent, 'mount', 'a restore whose turn already ended is not started twice')
+  assert.equal(rows.get('s3').running, false)
+  assert.equal(rows.get('s3').epoch, 0)
+
+  release()
+  const settled = await running
+  assert.equal(settled.status, 'interrupted')
+  assert.equal(store.state.consumed, null)
+  const after = new Map(store.state.plan.sessions.map((row) => [row.sessionId, row]))
+  assert.deepEqual([...after.values()].map((row) => [row.intent, row.epoch]), [['continue', 3], ['continue', 3], ['mount', 0]], 'a result that lands after the pause does not revive the old cycle')
+  assert.equal(after.get('s2').continuedTurn, undefined, "the stale turn is not recorded as this cycle's continuation")
+})
+
+test('a pause during a restore keeps an unstarted admission in the same cycle', async () => {
+  const plan = {
+    version: 3, planId: 'p13', source: 'pause', status: 'paused',
+    sessions: [{ sessionId: 's1', running: true, lastTurn: 4, epoch: 1, admittedRequest: 'req-1', admittedEpoch: 1 }],
+    goals: [], jobs: [], attention: [],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe(
+    { sessions: [{ sessionId: 's1', running: true, lastTurn: 4 }], goals: [], jobs: [], readable: true },
+    { sessions: [{ sessionId: 's1', lastTurn: 4 }] },
+  )
+  let release = null
+  probe.restoreSession = async (session) => {
+    probe.calls.push(['session', session.sessionId])
+    await new Promise((resolve) => { release = resolve })
+    return { status: 'restored', detail: 'attached', turn: 5 }
+  }
+  const engine = createEngine({ store, probe, now: () => 1700000000000, bootId: 'boot-1', log: () => {} })
+  const running = engine.resume()
+  while (release === null) await new Promise((resolve) => setTimeout(resolve, 0))
+
+  await engine.pause()
+  const row = store.state.plan.sessions[0]
+  assert.equal(row.intent, 'continue')
+  assert.equal(row.epoch, 1, 'no turn opened, so the cycle is unchanged')
+  assert.equal(row.admittedRequest, 'req-1', 'the admitted message must be waited for, not sent again')
+  assert.equal(row.admittedEpoch, 1)
+
+  release()
+  await running
 })

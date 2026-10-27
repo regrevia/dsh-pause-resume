@@ -1063,6 +1063,28 @@ test('a continuation already admitted before the restart is waited for, never se
   assert.equal(rig.fake.calls.some((call) => call[0] === 'prompt'), false)
 })
 
+test('an admission from an older cycle is not waited for in this one', async () => {
+  const rig = turnRig({ lastTurn: 6 })
+  rig.fake.services.sessionController.prompt = async (request) => {
+    rig.fake.calls.push(['prompt', request.requestId])
+    const agent = rig.fake.live.get('s1')
+    agent.status = 'running'
+    agent.phase.lastTurn = 7
+    rig.state.lastTurn = 7
+    rig.state.openTurnStartSeq = 4
+    return { accepted: true }
+  }
+  const probe = createProbe(rig.fake.registry, { settleMs: 400, watchTurn: rig.watchTurn })
+  const outcome = await probe.restoreSession(
+    // The old turn consumed that admission; this cycle owes a fresh prompt.
+    { sessionId: 's1', intent: 'continue', epoch: 2, lastTurn: 6, admittedRequest: 'continue:p1:s1:1:0', admittedEpoch: 1 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'restored')
+  assert.equal(outcome.continued, true)
+  assert.equal(rig.fake.calls.filter((call) => call[0] === 'prompt').length, 1, 'the stale admission is replaced, not awaited')
+})
+
 test('an admitted continuation whose record cannot be saved is held instead of pressed on', async () => {
   const rig = turnRig({ lastTurn: 6 })
   rig.fake.services.sessionController.prompt = async (request) => {

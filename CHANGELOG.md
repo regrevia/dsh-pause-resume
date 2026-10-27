@@ -3,6 +3,7 @@
 - A restore intent is read back exactly as it was declared: `unknown` and `skip` survive every read, a declared intent outranks the old `running` flag, and a cold restore no longer mounts a session whose plan said it had nothing to prove.
 - Whether a continuation finished is decided from the turn boundary (`turn/start`, `turn/end`, the open turn start) instead of the phase counter, and the admitted request id is written to its row before the turn is waited on. A turn that already ended is skipped, an open one is reported restored, and a message admitted just before a restart is waited for instead of being sent a second time.
 - Sessions discovered mid-pause are written into the plan before they are stopped. A plan that cannot be written leaves those sessions running and says so, instead of cancelling work it cannot name.
+- A pause during a restore starts a new cycle for exactly the rows whose turn was still open when they were stopped: those owe another continuation under a higher epoch, while a row that was already restored and idle is only mounted again and a row whose admission has not begun keeps its pending request and its epoch. A restore result that lands after the pause cannot write into the plan the pause rebuilt.
 
 ## 0.5.12
 
