@@ -47,36 +47,59 @@ window.__ModuleLoader__.load({
       error: null, // ui-copy-ignore
     }
 
-    function withTimeout(promise, ms = REQUEST_MS) {
+    // A deadline must also release the request, not only stop waiting for it: a Host that keeps
+    // the socket open would otherwise leave one hung request per timeout until the browser's per
+    // origin connection pool is full and every later poll queues behind dead requests.
+    function withTimeout(promise, ms = REQUEST_MS, controller = null) {
       let id = null
       const timer = new Promise((_resolve, reject) => {
-        id = setTimeout(() => reject(new Error('timeout')), ms) // ui-copy-ignore
+        id = setTimeout(() => {
+          try {
+            controller?.abort()
+          } catch {}
+          reject(new Error('timeout')) // ui-copy-ignore
+        }, ms)
       })
       return Promise.race([promise, timer]).finally(() => clearTimeout(id))
     }
 
+    /** One request's own controller, aborted when the page goes away or its deadline passes. */
+    function link(parent) {
+      const own = typeof AbortController === 'function' ? new AbortController() : null
+      if (own !== null && parent !== null && parent !== undefined) {
+        if (parent.aborted === true) own.abort()
+        else {
+          try {
+            parent.addEventListener('abort', () => own.abort(), { once: true })
+          } catch {}
+        }
+      }
+      return own
+    }
+
     async function readState(signal) {
+      const own = link(signal)
       try {
-        const response = await withTimeout(fetch(`${HOST_BASE}/state`, { cache: 'no-store', credentials: 'same-origin', signal })) // ui-copy-ignore
+        const response = await withTimeout(fetch(`${HOST_BASE}/state`, { cache: 'no-store', credentials: 'same-origin', signal: own?.signal }), REQUEST_MS, own) // ui-copy-ignore
         if (!response.ok) return null
-        const data = await withTimeout(response.json())
+        const data = await withTimeout(response.json(), REQUEST_MS, own)
         return data !== null && typeof data === 'object' ? data : null
       } catch {
         return null
       }
     }
 
-    async function press(action, signal) {
+    async function press(action, controller) {
       try {
         const response = await withTimeout(fetch(`${HOST_BASE}/${action}`, {
           method: 'POST', // ui-copy-ignore
           credentials: 'same-origin',
           headers: { 'content-type': 'application/json', 'x-dsh-pause-resume': '1' }, // ui-copy-ignore
           body: '{}', // ui-copy-ignore
-          signal,
-        }))
+          signal: controller?.signal,
+        }), REQUEST_MS, controller)
         if (!response.ok) return null
-        const data = await withTimeout(response.json())
+        const data = await withTimeout(response.json(), REQUEST_MS, controller)
         return data !== null && typeof data === 'object' ? data : null
       } catch {
         return null
@@ -198,6 +221,8 @@ window.__ModuleLoader__.load({
           if (timer !== null) clearTimeout(timer)
           try {
             current?.abort()
+            // A press in flight when the page unmounts must not keep its socket either.
+            inflight.current?.abort()
           } catch {}
           document.removeEventListener('visibilitychange', onVisible)
         }
@@ -215,15 +240,16 @@ window.__ModuleLoader__.load({
         inflight.current = controller
         setPressing(true)
         try {
-          const answer = await press(action, controller?.signal)
+          const answer = await press(action, controller)
           const next = answer ?? (await readState())
           if (mounted.current) {
             if (next !== null) {
               seq.current += 1
               setState({ ...EMPTY, ...next })
             } else {
-              // The press may still have landed: ask again rather than guessing the phase.
-              void pull(controller?.signal)
+              // The press may still have landed: ask again rather than guessing the phase. A new
+              // request of its own, never the press's controller, which a timeout has aborted.
+              void pull()
             }
           }
         } finally {

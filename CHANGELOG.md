@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.11
+
+A Host that stops answering had no way to release its requests: the page waited for an answer,
+gave up on the answer, and left the connection open. Repeating that fills the browser's
+per-origin connection pool, and from then on every poll queues behind requests nobody is
+reading, so the button stops updating even though the Host is back.
+
+* Every page request now has its own abort controller chained to the caller's signal, and the
+  deadline aborts it instead of only abandoning the promise. A press in flight when the page
+  unmounts is aborted too.
+* A press whose answer was lost asks for the state with a fresh request instead of reusing the
+  controller the timeout just aborted.
+* A new integration suite drives the real atomic writer across simulated restarts: a paused plan
+  resumes with the same baselines, an interrupted stop is mounted only and never continued, and
+  the archive and last-restore record survive the process that wrote them.
+
 ## 0.4.10
 
 A plugin reload during a pause could keep cancelling turns and jobs that the next instance had
