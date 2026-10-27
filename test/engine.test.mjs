@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { createEngine } from '../lib/engine.js'
 
 /** A store with the same surface as the durable one, small enough to inspect after each press. */
-function fakeStore({ plan = null, journal = [], failWrite = false, failConsume = false, failJournal = false, failPending = false } = {}) {
-  const state = { plan, pending: null, writes: [], consumed: null, result: null, journal: new Map(), failWrite, failConsume, failJournal, failPending }
+function fakeStore({ plan = null, journal = [], failWrite = false, failWriteAfter = null, failConsume = false, failJournal = false, failPending = false } = {}) {
+  const state = { plan, pending: null, writes: [], consumed: null, result: null, journal: new Map(), failWrite, failWriteAfter, failConsume, failJournal, failPending }
   for (const key of journal) state.journal.set(key, { status: 'restored', boot: 'boot-0' })
   return {
     state,
@@ -12,6 +12,7 @@ function fakeStore({ plan = null, journal = [], failWrite = false, failConsume =
     write: (next) => {
       state.writes.push(structuredClone(next))
       if (state.failWrite === true) return null
+      if (state.failWriteAfter !== null && state.writes.length > state.failWriteAfter) return null
       state.plan = { ...next }
       return state.plan
     },
@@ -1045,4 +1046,72 @@ test('a goal already proven by its exact armed revision is re-armed without a ne
   const outcome = await engine.resume()
   assert.equal(outcome.status, 'resumed')
   assert.deepEqual(probe.calls.map((call) => call[0]), ['goal'])
+})
+
+test('a post-stop write failure keeps the complete plan in memory for a resume', async () => {
+  const probe = fakeProbe({
+    sessions: [{ sessionId: 's1', running: true, lastTurn: 2 }],
+    goals: [],
+    jobs: [],
+    readable: true,
+  })
+  const store = fakeStore({ failWriteAfter: 1 })
+  const { engine } = engineFor({ store, probe })
+  const paused = await engine.pause()
+  assert.equal(paused.status, 'paused')
+  assert.equal(engine.describe().error, 'store')
+  // The durable file still says `pausing`; the in-memory fallback must still offer a real resume
+  // instead of degrading this process to mount-only.
+  assert.equal(engine.describe().action, 'resume')
+  store.state.failWriteAfter = null
+  const resumed = await engine.resume()
+  assert.equal(resumed.status, 'resumed')
+  const consumed = store.state.consumed?.plan
+  assert.equal(consumed.sessions[0].intent, 'continue')
+})
+
+test('a stop that throws is reported as partial instead of a clean pause', async () => {
+  const probe = fakeProbe({
+    sessions: [{ sessionId: 's1', running: true, lastTurn: 2 }],
+    goals: [],
+    jobs: [],
+    readable: true,
+  })
+  probe.stop = async () => { throw new Error('boom') }
+  const store = fakeStore()
+  const { engine } = engineFor({ store, probe })
+  const paused = await engine.pause()
+  assert.equal(paused.status, 'partial')
+  const state = engine.describe()
+  assert.equal(state.action, 'resume')
+  assert.equal(state.complete, false)
+  assert.ok(state.attention > 0)
+  assert.equal(store.state.plan.attention.some((row) => /stop failed: boom/u.test(row.detail)), true)
+  assert.equal(store.state.plan.status, 'partial')
+})
+
+test('a session that starts during the pause is continued with the captured turns', async () => {
+  const probe = fakeProbe({
+    sessions: [{ sessionId: 's1', running: true, lastTurn: 2 }],
+    goals: [],
+    jobs: [],
+    readable: true,
+  })
+  probe.stop = async () => ({
+    canceled: ['s1', 's2'], unknown: [], pausedGoals: [], goalErrors: [], killedJobs: [], jobErrors: [],
+    stillRunning: [], sessions: [
+      { sessionId: 's1', lastTurn: 3 },
+      { sessionId: 's2', lastTurn: 1 },
+    ],
+    discovered: [{ sessionId: 's2', lastTurn: 0 }],
+  })
+  const store = fakeStore()
+  const { engine } = engineFor({ store, probe })
+  await engine.pause()
+  const plan = store.state.plan
+  assert.deepEqual(plan.sessions.map((row) => row.sessionId), ['s1', 's2'])
+  assert.deepEqual(plan.sessions.map((row) => row.intent), ['continue', 'continue'])
+  assert.deepEqual(plan.sessions.map((row) => row.lastTurn), [3, 1])
+  assert.deepEqual(plan.stopped.discovered, ['s2'])
+  assert.ok(plan.sessions.every((row) => row.epoch === 1))
 })

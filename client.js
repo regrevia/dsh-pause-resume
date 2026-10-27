@@ -112,16 +112,6 @@ window.__ModuleLoader__.load({
       position: 'relative', // ui-copy-ignore
     }
 
-    const DOT_STYLE = {
-      position: 'absolute', // ui-copy-ignore
-      top: 4, // ui-copy-ignore
-      right: 4, // ui-copy-ignore
-      width: 5, // ui-copy-ignore
-      height: 5, // ui-copy-ignore
-      borderRadius: '50%',
-      background: 'var(--dsh-color-danger, #d1242f)',
-    }
-
     const SPIN_STYLE = { display: 'inline-flex', animation: 'dsh-pr-spin 900ms linear infinite' } // ui-copy-ignore
 
     function icon(paths, extra) {
@@ -262,7 +252,7 @@ window.__ModuleLoader__.load({
         title: hint === '' ? label : `${label} · ${hint}`,
         onMouseEnter: () => setHover(true),
         onMouseLeave: () => setHover(false),
-      }, glyph, hint === '' ? null : h('span', { style: DOT_STYLE, 'aria-hidden': true }))
+      }, glyph)
     }
 
     return {

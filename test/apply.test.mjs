@@ -109,3 +109,34 @@ test('routes exist before hydration settles and state waits for it', async () =>
   assert.equal(JSON.parse(answer.body).phase, 'idle')
   rmSync(home, { recursive: true, force: true })
 })
+
+test('a plugin applied before the web server mounts its routes once the service appears', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-pause-test-'))
+  process.env.DSH_HOME = home
+  const routes = []
+  let pending = null
+  const registry = {
+    sessionController: { cancel: async () => {}, resolveAgent: async () => undefined },
+    goals: { get: () => undefined, pause: () => {}, resume: () => {} },
+    jobs: { list: () => [], kill: () => {} },
+    agents: { get: () => undefined, list: () => [], resume: async () => {} },
+  }
+  // After a crash the Host can apply plugins before its web server exists. A one-shot lookup then
+  // found nothing and the button stayed disabled with no route behind it for the whole session.
+  apply({
+    get: (key) => registry[key],
+    effect: () => {},
+    on: () => {},
+    inject: (deps, fn) => { pending = { deps, fn }; return () => {} },
+  }, {})
+  assert.equal(routes.length, 0, 'no route before the service exists')
+  assert.deepEqual(pending.deps, ['webServer'])
+  pending.fn({ get: (key) => (key === 'webServer' ? { register: (route) => routes.push(route) } : registry[key]) })
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  assert.deepEqual(routes.map((route) => route.path).sort(), [
+    '/dsh-pause-resume/pause',
+    '/dsh-pause-resume/resume',
+    '/dsh-pause-resume/state',
+  ])
+  rmSync(home, { recursive: true, force: true })
+})

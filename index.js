@@ -7,7 +7,7 @@ import { createHeartbeat } from './lib/heartbeat.js'
 import { createProbe, listRunning } from './lib/probe.js'
 
 export const name = 'dsh-pause-resume'
-export const VERSION = '0.4.8'
+export const VERSION = '0.4.9'
 
 const BASE_PATH = '/dsh-pause-resume'
 const BUTTON_HEADER = 'x-dsh-pause-resume'
@@ -282,9 +282,29 @@ export function apply(ctx, config = {}) {
   const ready = new Promise((resolve) => {
     releaseReady = resolve
   })
-  const dispose = serve(ctx, engine, heartbeat, { allowRemote }, ready)
-  if (disposed) dispose()
-  else disposeRoutes = dispose
+  // The web server is not always there when a plugin is applied — after a crash the desktop host
+  // can mount plugins before it exists. Asking once and giving up left the button permanently
+  // disabled with no route behind it, which reads exactly like "the pause button does not work".
+  // Wait for the service instead; on a boot where it already exists this mounts synchronously.
+  let routeDispose = () => {}
+  let injectDispose = () => {}
+  const mount = (scope) => {
+    routeDispose = serve(scope, engine, heartbeat, { allowRemote }, ready)
+    if (disposed) {
+      routeDispose()
+      routeDispose = () => {}
+    }
+  }
+  if (typeof ctx.inject === 'function') {
+    const unmount = ctx.inject(['webServer'], mount)
+    if (typeof unmount === 'function') injectDispose = unmount
+  } else {
+    mount(ctx)
+  }
+  disposeRoutes = () => {
+    injectDispose()
+    routeDispose()
+  }
 
   void (async () => {
     try {

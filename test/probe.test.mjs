@@ -242,14 +242,14 @@ test('restoreSession() keeps a session that failed to mount retryable', async ()
   assert.match(outcome.detail, /REMOTE_CONFLICT/u)
 })
 
-test('restoreSession() leaves a subagent row to its parent instead of failing forever', async () => {
+test('restoreSession() reports a subagent row as skipped, not as work a person must fix', async () => {
   const failing = registry({
     agents: { get: () => undefined, list: () => [] },
     sessionController: { resolveAgent: async () => { throw new Error('session "s1" is owned by subagent routing') } },
   })
   const probe = createProbe(failing)
   const outcome = await probe.restoreSession({ sessionId: 's1', running: false }, { plan: { planId: 'p1' } })
-  assert.equal(outcome.status, 'attention')
+  assert.equal(outcome.status, 'skipped')
   assert.match(outcome.detail, /parent restores it/u)
 })
 
@@ -492,4 +492,94 @@ test('restoreGoal() refuses a paused goal edited after its restore intent was wr
   )
   assert.equal(outcome.status, 'attention')
   assert.equal(fake.calls.some((call) => call[0] === 'goals.resume'), false)
+})
+
+test('stop() cancels every open turn in one round trip', async () => {
+  const agents = new Map([
+    ['s1', { id: 's1', status: 'running', phase: { lastTurn: 0 } }],
+    ['s2', { id: 's2', status: 'running', phase: { lastTurn: 0 } }],
+  ])
+  let inFlight = 0
+  let peak = 0
+  const services = {
+    agents: { get: (id) => agents.get(id), list: () => [...agents.values()] },
+    jobs: { list: () => [], kill: () => {} },
+    sessionController: {
+      cancel: async ({ sessionId }) => {
+        inFlight += 1
+        peak = Math.max(peak, inFlight)
+        await new Promise((resolve) => setTimeout(resolve, 60))
+        inFlight -= 1
+        const agent = agents.get(sessionId)
+        agent.status = 'idle'
+        agent.phase.lastTurn += 1
+      },
+    },
+  }
+  const probe = createProbe(registry(services), { graceMs: 500 })
+  const stopped = await probe.stop(probe.live())
+  assert.equal(peak, 2)
+  assert.deepEqual([...stopped.canceled].sort(), ['s1', 's2'])
+  assert.deepEqual(stopped.stillRunning, [])
+})
+
+test('stop() bounds a cancel that never answers instead of pinning the press forever', async () => {
+  const agent = { id: 's1', status: 'running', phase: { lastTurn: 0 } }
+  const services = {
+    agents: { get: () => agent, list: () => [agent] },
+    jobs: { list: () => [], kill: () => {} },
+    sessionController: { cancel: () => new Promise(() => {}) },
+  }
+  const probe = createProbe(registry(services), { graceMs: 200, cancelMs: 40 })
+  const started = Date.now()
+  const stopped = await probe.stop(probe.live())
+  assert.ok(Date.now() - started < 1000)
+  assert.deepEqual(stopped.canceled, [])
+  assert.match(stopped.unknown[0], /timed out/u)
+  assert.deepEqual(stopped.stillRunning, ['s1'])
+})
+
+test('stop() reports a missing cancel or kill service instead of claiming success', async () => {
+  const agent = { id: 's1', status: 'running', phase: { lastTurn: 0 } }
+  const services = { agents: { get: () => agent, list: () => [agent] } }
+  const probe = createProbe(registry(services), { graceMs: 100 })
+  const stopped = await probe.stop({
+    sessions: [{ sessionId: 's1', running: true }],
+    goals: [],
+    jobs: [{ id: 'j1', owner: null }],
+  })
+  assert.deepEqual(stopped.canceled, [])
+  assert.deepEqual(stopped.killedJobs, [])
+  assert.match(stopped.unknown[0], /cancel unavailable/u)
+  assert.match(stopped.jobErrors[0], /job service unavailable/u)
+})
+
+test('stop() cancels a turn that started after the capture and returns it as discovered', async () => {
+  const agents = new Map([
+    ['s1', { id: 's1', status: 'running', phase: { lastTurn: 0 } }],
+    ['s2', { id: 's2', status: 'idle', phase: { lastTurn: 0 } }],
+  ])
+  const services = {
+    agents: { get: (id) => agents.get(id), list: () => [...agents.values()] },
+    jobs: { list: () => [], kill: () => {} },
+    sessionController: {
+      cancel: async ({ sessionId }) => {
+        const agent = agents.get(sessionId)
+        agent.status = 'idle'
+        agent.phase.lastTurn += 1
+        // A queued continuation starts the moment the first turn ends.
+        if (sessionId === 's1') agents.get('s2').status = 'running'
+      },
+    },
+  }
+  const probe = createProbe(registry(services), { graceMs: 300 })
+  const stopped = await probe.stop({
+    sessions: [{ sessionId: 's1', running: true }],
+    goals: [],
+    jobs: [],
+  })
+  assert.deepEqual([...stopped.canceled].sort(), ['s1', 's2'])
+  assert.deepEqual(stopped.discovered, [{ sessionId: 's2', lastTurn: 0 }])
+  assert.equal(stopped.sessions.find((row) => row.sessionId === 's2').lastTurn, 1)
+  assert.deepEqual(stopped.stillRunning, [])
 })

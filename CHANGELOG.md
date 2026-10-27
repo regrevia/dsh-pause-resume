@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.4.9
+
+A pause could report "paused" while work it had not captured was still starting, and two disk
+failures could turn a complete stop into a mount-only restore. This is the 0.4.8 review.
+
+* A turn that started after the capture was left running behind a `paused` label. The stop now
+  discovers newcomers within a bounded budget, cancels them in parallel with the captured turns,
+  and records them with the same continuation cycle and post-stop turn baseline. A newcomer that
+  arrives after the budget is reported as `still running`, never hidden.
+* A stop whose final plan write failed kept the pre-stop `pausing` copy on disk and silently
+  dropped the complete in-memory plan, so the next resume mounted sessions without continuing
+  their interrupted turn. The complete plan now stays in memory for that process and is still
+  offered for restore, while the failed write is reported.
+* A probe that threw was recorded as a clean pause with no stopped sessions. The throw is now a
+  `partial` stop with its own attention row, and every captured session keeps its plan.
+* Cancelling turns is parallel and bounded: a Harness cancel that never answers fails the item
+  after 3s instead of pinning the button in `pausing` forever, and a missing cancel or job service
+  is reported instead of counted as stopped.
+* After a crash the Host can apply plugins before its web server exists. The plugin asked once,
+  found nothing, and stayed mounted without a route, so the header button was permanently a
+  disabled pause glyph with nothing behind it. Mounting now waits for the web server and registers
+  the routes as soon as it appears.
+* A subagent row a pause could not claim was reported as restore attention even though its parent
+  restores it. It is now `skipped`: a normal fan-out pause no longer marks the button as something
+  a person has to fix.
+* The red attention dot is gone. It appeared for conditions that resolve themselves and never said
+  which condition it was; the button now only reports the phase, and the explanation stays in the
+  tooltip.
+
 ## 0.4.8
 
 * A restore report could leave its attention dot on the header forever: the report is written once

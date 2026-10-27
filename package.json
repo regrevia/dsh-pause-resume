@@ -1,6 +1,6 @@
 {
   "name": "dsh-pause-resume",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "type": "module",
   "description": "One header button stops running turns, goals and jobs, writes a plan to disk, and restores that work after a restart or crash; the button shape is the only status.",
   "license": "MIT",
