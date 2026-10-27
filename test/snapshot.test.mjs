@@ -221,3 +221,79 @@ test('a journal row records the boot that wrote it', () => {
   assert.equal(row.status, 'restored')
   assert.equal(row.boot, 'boot-a')
 })
+
+test('every legal intent survives a real file round trip and is not downgraded', () => {
+  const root = dir()
+  const intents = ['continue', 'mount', 'unknown', 'skip']
+  const sessions = intents.map((intent, index) => ({
+    sessionId: `s${index}`,
+    intent,
+    running: intent === 'continue',
+    epoch: index,
+    lastTurn: 10 + index,
+    continuedTurn: 20 + index,
+  }))
+  createStore(root).write(draft({ sessions }))
+  const first = createStore(root).read()
+  assert.deepEqual(first.sessions.map((row) => row.intent), intents)
+  // Writing the normalized plan again is where an unknown/skip row used to turn into `mount`.
+  assert.notEqual(createStore(root).write(first), null)
+  const second = createStore(root).read()
+  assert.deepEqual(second.sessions.map((row) => ({
+    intent: row.intent,
+    running: row.running,
+    epoch: row.epoch,
+    lastTurn: row.lastTurn,
+    continuedTurn: row.continuedTurn,
+  })), intents.map((intent, index) => ({
+    intent,
+    running: intent === 'continue',
+    epoch: index,
+    lastTurn: 10 + index,
+    continuedTurn: 20 + index,
+  })))
+})
+
+test('an explicit intent outranks the old running flag', () => {
+  const store = createStore(dir())
+  store.write(draft({
+    sessions: [
+      { sessionId: 's1', intent: 'unknown', running: true, epoch: 0 },
+      { sessionId: 's2', intent: 'mount', running: true, epoch: 0 },
+      { sessionId: 's3', running: false, epoch: 0 },
+    ],
+  }))
+  const rows = store.read().sessions
+  assert.equal(rows[0].intent, 'unknown')
+  assert.equal(rows[0].running, false)
+  assert.equal(rows[1].intent, 'mount')
+  assert.equal(rows[1].running, false)
+  // Only a row with no intent at all may fall back to the pre-intent convention.
+  assert.equal(rows[2].intent, 'mount')
+})
+
+test('an intent this build does not know stays unknown with its old value kept', () => {
+  const store = createStore(dir())
+  store.write(draft({ sessions: [{ sessionId: 's1', intent: 'await-style', running: true }] }))
+  const row = store.read().sessions[0]
+  assert.equal(row.intent, 'unknown')
+  assert.equal(row.running, false)
+  assert.equal(row.legacyIntent, 'await-style')
+})
+
+test('a failed rewrite leaves the last complete intent record readable', () => {
+  const root = dir()
+  const realWrite = nodeFs.writeSync
+  let failing = false
+  const impl = { ...nodeFs, writeSync: (...args) => {
+    if (failing) throw new Error('injected write failure')
+    return realWrite(...args)
+  } }
+  const store = createStore(root, { fs: impl })
+  assert.notEqual(store.write(draft({ sessions: [{ sessionId: 's1', intent: 'unknown', epoch: 2 }] })), null)
+  failing = true
+  assert.equal(store.write(draft({ sessions: [{ sessionId: 's1', intent: 'mount', epoch: 0 }] })), null)
+  const kept = createStore(root).read()
+  assert.equal(kept.sessions[0].intent, 'unknown')
+  assert.equal(kept.sessions[0].epoch, 2)
+})

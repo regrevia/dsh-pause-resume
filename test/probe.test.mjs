@@ -968,3 +968,28 @@ test('stop() re-cancels a turn that shrugs off the first cancel', async () => {
   assert.deepEqual(stopped.stillRunning, [])
   assert.deepEqual(stopped.canceled, ['s1'])
 })
+
+test('a skip row settles without mounting, prompting or cancelling anything', async () => {
+  const fake = harness({ agents: [] })
+  const probe = createProbe(fake.registry)
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'skip', epoch: 0, running: false, lastTurn: 7, crash: true },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'skipped')
+  assert.equal(outcome.continued, false)
+  // The turn provably ended before the restart, so the plan owes nothing: no attach, no prompt.
+  assert.deepEqual(fake.calls, [])
+})
+
+test('an unknown row attaches for inspection but never continues', async () => {
+  const fake = harness({ agents: [] })
+  const probe = createProbe(fake.registry)
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'unknown', epoch: 0, running: false, lastTurn: null, crash: true },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'unknown')
+  assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
+  assert.equal(fake.calls.some((call) => call[0] === 'resolveAgent'), true)
+})
