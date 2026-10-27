@@ -1609,3 +1609,47 @@ test('a pause during a restore keeps an unstarted admission in the same cycle', 
   release()
   await running
 })
+
+
+test('a crash residue merged into a pause plan keeps every operation field the plan already had', async () => {
+  const plan = {
+    version: 3, planId: 'p1', source: 'pause', status: 'paused',
+    sessions: [{
+      sessionId: 's1', intent: 'continue', epoch: 4, running: true, lastTurn: 5, continuedTurn: 5,
+      admittedRequest: 'req-9', admittedEpoch: 4, retry: 2,
+    }],
+    goals: [{ sessionId: 's1', goalId: 'g1', revision: 9, armedRevision: 7, pendingRestore: { expect: 9 } }],
+    jobs: [], attention: [], restore: { attempts: 1 },
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe()
+  probe.crashPlan = (residue, options) => ({
+    version: 3, planId: options.planId, source: 'crash', status: 'paused',
+    sessions: residue.sessions.map((row) => ({ sessionId: row.sessionId, intent: 'continue', epoch: 0, running: true, lastTurn: row.lastTurn, crash: true })),
+    goals: residue.goals.map((row) => ({ sessionId: row.sessionId, goalId: row.goalId, revision: row.revision + 1, armedRevision: row.revision + 1, crash: true })),
+    jobs: [], attention: [],
+  })
+  const { engine } = engineFor({ store, probe })
+  const first = await engine.hydrate({ residue: { sessions: [{ sessionId: 's1', lastTurn: 9 }, { sessionId: 's2' }], goals: [{ sessionId: 's1', goalId: 'g1', revision: 11 }], at: 1 } })
+  assert.equal(first.phase, 'paused')
+  const session = store.state.plan.sessions.find((row) => row.sessionId === 's1')
+  // The pause plan captured by hand is authoritative: a newer crash record may add work but must
+  // not reset the cycle, the admission, or the retry count of a row it already describes.
+  assert.equal(session.epoch, 4)
+  assert.equal(session.admittedRequest, 'req-9')
+  assert.equal(session.admittedEpoch, 4)
+  assert.equal(session.continuedTurn, 5)
+  assert.equal(session.retry, 2)
+  const added = store.state.plan.sessions.find((row) => row.sessionId === 's2')
+  assert.equal(added.intent, 'mount')
+  assert.equal(added.running, false)
+  assert.equal(store.state.plan.goals[0].revision, 9)
+  assert.equal(store.state.plan.goals[0].armedRevision, 7)
+  assert.deepEqual(store.state.plan.goals[0].pendingRestore, { expect: 9 })
+  // Reading the same residue again on the next boot must be a no-op, not a second merge.
+  const writes = store.state.writes.length
+  const { engine: next } = engineFor({ store, probe })
+  await next.hydrate({ residue: { sessions: [{ sessionId: 's1', lastTurn: 9 }, { sessionId: 's2' }], goals: [{ sessionId: 's1', goalId: 'g1', revision: 11 }], at: 1 } })
+  assert.equal(store.state.writes.length, writes)
+  assert.equal(store.state.plan.sessions.filter((row) => row.sessionId === 's2').length, 1)
+})

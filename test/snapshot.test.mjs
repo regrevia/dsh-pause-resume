@@ -297,3 +297,111 @@ test('a failed rewrite leaves the last complete intent record readable', () => {
   assert.equal(kept.sessions[0].intent, 'unknown')
   assert.equal(kept.sessions[0].epoch, 2)
 })
+
+
+test('a 0.2.x plan is migrated from its running flag, and a migrated read is stable', () => {
+  const root = dir()
+  writeFileSync(join(root, 'snapshot.json'), JSON.stringify({
+    version: 2,
+    planId: 'p2',
+    status: 'partial',
+    createdAt: 'then',
+    sessions: [
+      { sessionId: 's1', running: true, lastTurn: 3, retry: 2 },
+      { sessionId: 's2', running: false },
+      { sessionId: 's3' },
+    ],
+    goals: [{ sessionId: 's1', goalId: 'g1', revision: 7 }],
+    jobs: [{ id: 'j1', detail: 'stopped, not restarted' }],
+    attention: [{ kind: 'job', id: 'j1', detail: 'stopped' }],
+  }))
+  const store = createStore(root)
+  const first = store.read()
+  assert.equal(first.version, 3)
+  assert.equal(first.status, 'partial')
+  assert.equal(first.planId, 'p2')
+  // The old flag is the only intent signal a 0.2.x plan has: a stopped turn continues, a parked
+  // session is only mounted, and a row that never declared either is not promoted to a turn.
+  assert.deepEqual(first.sessions.map((row) => [row.intent, row.running]), [['continue', true], ['mount', false], ['mount', false]])
+  assert.equal(first.sessions[0].epoch, 0)
+  // A goal from before the armed-revision proof is reported, never resumed: this read must not
+  // invent the proof the old release never wrote.
+  assert.equal(first.goals[0].revision, 7)
+  assert.equal(first.goals[0].armedRevision, null)
+  assert.equal(first.sessions[0].retry, 2)
+  assert.deepEqual(createStore(root).read(), first)
+})
+
+test('the operation metadata a restore needs survives a write, read and rewrite unchanged', () => {
+  const root = dir()
+  const store = createStore(root)
+  const plan = {
+    planId: 'p3',
+    status: 'paused',
+    createdAt: 'now',
+    source: 'pause',
+    sessions: [{
+      sessionId: 's1',
+      intent: 'continue',
+      epoch: 4,
+      running: true,
+      lastTurn: 5,
+      continuedTurn: 5,
+      admittedRequest: 'req-9',
+      admittedEpoch: 4,
+      retry: 2,
+      note: 'kept',
+    }, {
+      sessionId: 's2',
+      intent: 'mount',
+      epoch: 0,
+      running: false,
+      lastTurn: null,
+      pendingRestore: { expect: 6, at: 'now' },
+    }],
+    goals: [{
+      sessionId: 's1',
+      goalId: 'g1',
+      revision: 9,
+      armedRevision: 7,
+      pendingRestore: { expect: 9, at: 'now' },
+      retry: 1,
+    }],
+    jobs: [{ id: 'j1', status: 'stopped' }],
+    attention: [],
+    extra: { keep: true },
+  }
+  assert.equal(store.write(plan).version, 3)
+  const read = createStore(root).read()
+  const session = read.sessions.find((row) => row.sessionId === 's1')
+  assert.equal(session.epoch, 4)
+  assert.equal(session.continuedTurn, 5)
+  assert.equal(session.admittedRequest, 'req-9')
+  assert.equal(session.admittedEpoch, 4)
+  assert.equal(session.retry, 2)
+  assert.equal(session.note, 'kept')
+  const mounted = read.sessions.find((row) => row.sessionId === 's2')
+  assert.equal(mounted.intent, 'mount')
+  assert.deepEqual(mounted.pendingRestore, { expect: 6, at: 'now' })
+  assert.equal(read.goals[0].revision, 9)
+  assert.equal(read.goals[0].armedRevision, 7)
+  assert.deepEqual(read.goals[0].pendingRestore, { expect: 9, at: 'now' })
+  assert.deepEqual(read.extra, { keep: true })
+  // A second pass must not change what the first read already normalized, or every boot would
+  // rewrite the plan and throw away its history.
+  store.write(read)
+  assert.deepEqual(createStore(root).read(), read)
+})
+
+test('a legacy plan keeps one journal name for every read of the same file', () => {
+  const root = dir()
+  const path = join(root, 'snapshot.json')
+  writeFileSync(path, JSON.stringify({ version: 1, status: 'paused', sessions: [{ sessionId: 's1', running: true }], goals: [] }))
+  const store = createStore(root)
+  const first = store.read()
+  const second = createStore(root).read()
+  assert.equal(first.planId, second.planId)
+  assert.equal(first.planId.startsWith('legacy-'), true)
+  assert.equal(store.appendJournal(first.planId, 's:s1', 'restored', 'boot-a'), true)
+  assert.equal(store.readJournal(second.planId).has('s:s1'), true)
+})
