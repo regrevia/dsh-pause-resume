@@ -39,8 +39,9 @@ const SELF_TEST_FAIL = process.argv.includes('--self-test-fail')
 // Live-work assertions need a real turn, which needs a configured model provider. On an isolated
 // profile there is none, so these stay `unverified` with a reason instead of being reported as
 // passing Host coverage. The controllable-service evidence lives in acceptance/round2.mjs.
+// `crash-turn-backfill` is no longer listed here: acceptance/host-live.mjs verifies it end-to-end
+// against a real Host with a held mock model stream (pause -> SIGKILL -> restart -> resume).
 const LIVE_CHECKS = [
-  { id: 'crash-turn-backfill', expectation: 'a turn interrupted by a crash is continued once after restart' },
   { id: 'maintenance-compaction-cancellable', expectation: 'a maintenance compaction in flight is cancelled by pause' },
   { id: 'stopping-job-visible', expectation: 'a job that is stopping shows up in the live state while stop is in flight' },
   { id: 'job-only-owner-handoff', expectation: 'a plan with only a stopped background job hands the owner session back' },

@@ -1,30 +1,24 @@
 {
-  "generatedAt": "2026-10-28T04:16:26.620Z",
+  "generatedAt": "2026-10-28T04:38:37.175Z",
   "plugin": {
     "name": "dsh-pause-resume",
-    "version": "0.6.2"
+    "version": "0.6.3"
   },
   "host": {
     "electron": "/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness",
     "cli": "/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js",
-    "dshHome": "/var/folders/jz/m25rbjt91gq8h84pjh6d4c9c0000gn/T/dsh-host-smoke-JGuN0v",
+    "dshHome": "/var/folders/jz/m25rbjt91gq8h84pjh6d4c9c0000gn/T/dsh-host-smoke-UaRTUZ",
     "profile": "smoke"
   },
   "steps": [
     {
       "step": "self-test-fail",
-      "at": "2026-10-28T04:16:26.621Z",
+      "at": "2026-10-28T04:38:37.176Z",
       "ok": false,
       "detail": "injected failure: this step must force a non-zero exit"
     }
   ],
   "live": [
-    {
-      "id": "crash-turn-backfill",
-      "expectation": "a turn interrupted by a crash is continued once after restart",
-      "status": "unverified",
-      "reason": "isolated smoke profile has no model provider, so no live turn can be produced; the same behaviour is exercised against controllable services in acceptance/round2.mjs"
-    },
     {
       "id": "maintenance-compaction-cancellable",
       "expectation": "a maintenance compaction in flight is cancelled by pause",

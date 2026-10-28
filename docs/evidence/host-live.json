@@ -1,0 +1,315 @@
+{
+  "generatedAt": "2026-10-28T04:38:39.144Z",
+  "kind": "host-live",
+  "plugin": {
+    "name": "dsh-pause-resume",
+    "version": "0.6.3"
+  },
+  "host": {
+    "kind": "isolated-electron",
+    "electron": "/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness",
+    "cli": "/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js",
+    "dshHome": "/var/folders/jz/m25rbjt91gq8h84pjh6d4c9c0000gn/T/dsh-host-live-cCoBtN",
+    "dshHomeRetained": false,
+    "profile": "live",
+    "baseProfile": "web",
+    "note": "throwaway DSH_HOME and OS-assigned port; the real ~/.dsh profile is not read or written",
+    "port": "http://127.0.0.1:53561"
+  },
+  "mock": {
+    "kind": "acceptance/mock-llm.mjs",
+    "holdRequests": 1,
+    "text": "MOCK_LLM_OK",
+    "requests": [
+      {
+        "n": 1,
+        "messages": 3,
+        "lastRole": "user",
+        "lastText": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: \"/Users/apple/Desktop/DSH/dsh-pause-resume\".\n\nC",
+        "held": true,
+        "finishedAt": null
+      },
+      {
+        "n": 2,
+        "messages": 2,
+        "lastRole": "user",
+        "lastText": "Generate the session title from this JSON array of human messages:\n[{\"seq\":8,\"text\":\"live turn for crash-turn-backfill\"}]",
+        "held": false,
+        "finishedAt": "2026-10-28T04:38:40.660Z"
+      },
+      {
+        "n": 3,
+        "messages": 8,
+        "lastRole": "user",
+        "lastText": "Time sampled while preparing turn 2, step 1: 2026-10-28T12:38:41+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
+        "held": false,
+        "finishedAt": "2026-10-28T04:38:41.618Z"
+      }
+    ]
+  },
+  "spike": {
+    "file": "acceptance/spike-live-turn.mjs",
+    "note": "generated into the throwaway DSH_HOME only; starts one turn through the public agents service, then steps aside after a crash"
+  },
+  "steps": [
+    {
+      "step": "profile-created",
+      "at": "2026-10-28T04:38:39.259Z",
+      "ok": true,
+      "code": 0,
+      "profile": "live",
+      "from": "web",
+      "stderr": ""
+    },
+    {
+      "step": "plugin-installed",
+      "at": "2026-10-28T04:38:39.681Z",
+      "ok": true,
+      "code": 0,
+      "plugin": "/Users/apple/Desktop/DSH/dsh-pause-resume",
+      "stderr": ""
+    },
+    {
+      "step": "model-overridden",
+      "at": "2026-10-28T04:38:39.685Z",
+      "ok": true,
+      "provider": "mock",
+      "api": "openai-completions",
+      "baseURL": "http://127.0.0.1:53552/v1"
+    },
+    {
+      "step": "host-ready",
+      "at": "2026-10-28T04:38:40.280Z",
+      "ok": true,
+      "url": "http://127.0.0.1:53553",
+      "boot": 1
+    },
+    {
+      "step": "live-turn-running",
+      "at": "2026-10-28T04:38:40.437Z",
+      "ok": true,
+      "phase": "idle",
+      "liveSessions": 1,
+      "request": {
+        "n": 1,
+        "messages": 3,
+        "lastText": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: \"/Users/apple/Desktop/DSH/dsh-pause-resume\".\n\nC",
+        "held": true
+      }
+    },
+    {
+      "step": "paused-with-plan",
+      "at": "2026-10-28T04:38:40.520Z",
+      "ok": true,
+      "status": 200,
+      "outcome": {
+        "status": "paused",
+        "counts": {
+          "sessions": 1,
+          "goals": 0,
+          "jobs": 0
+        },
+        "outstanding": 1
+      },
+      "phase": "paused",
+      "outstanding": 1,
+      "counts": {
+        "sessions": 1,
+        "goals": 0,
+        "jobs": 0
+      }
+    },
+    {
+      "step": "crashed",
+      "at": "2026-10-28T04:38:40.533Z",
+      "ok": true,
+      "signal": "SIGKILL",
+      "code": null,
+      "note": "SIGKILL: no graceful shutdown, no shutdown hook, no flush"
+    },
+    {
+      "step": "host-ready",
+      "at": "2026-10-28T04:38:41.165Z",
+      "ok": true,
+      "url": "http://127.0.0.1:53561",
+      "boot": 2
+    },
+    {
+      "step": "plan-survived-crash",
+      "at": "2026-10-28T04:38:41.217Z",
+      "ok": true,
+      "phase": "paused",
+      "outstanding": 1,
+      "counts": {
+        "sessions": 1,
+        "goals": 0,
+        "jobs": 0
+      }
+    },
+    {
+      "step": "resumed",
+      "at": "2026-10-28T04:38:41.300Z",
+      "ok": true,
+      "status": 200,
+      "outcome": {
+        "status": "resumed",
+        "summary": {
+          "planId": "pause-mvrmjpkm-1",
+          "source": "pause",
+          "restored": [
+            "session spike-live-turn"
+          ],
+          "skipped": [],
+          "failed": [],
+          "unknown": [],
+          "attention": [],
+          "rows": [
+            {
+              "key": "s:spike-live-turn",
+              "label": "session spike-live-turn",
+              "status": "restored",
+              "detail": "resumed and continued"
+            }
+          ],
+          "jobs": 0,
+          "jobsStopped": [],
+          "at": "2026-10-28T04:38:41.218Z"
+        }
+      }
+    },
+    {
+      "step": "continuation-request",
+      "at": "2026-10-28T04:38:41.756Z",
+      "ok": true,
+      "afterResume": {
+        "n": 3,
+        "messages": 8,
+        "lastText": "Time sampled while preparing turn 2, step 1: 2026-10-28T12:38:41+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
+        "carriesTurnText": true
+      },
+      "beforeCrash": {
+        "n": 1,
+        "messages": 3
+      },
+      "phase": "idle",
+      "outstanding": 0
+    },
+    {
+      "step": "exactly-once",
+      "at": "2026-10-28T04:38:44.758Z",
+      "ok": true,
+      "turnRequests": 2,
+      "totalRequests": 3,
+      "note": "one turn before the crash plus one continuation after resume; no third turn and no duplicate continuation"
+    },
+    {
+      "step": "restore-record",
+      "at": "2026-10-28T04:38:44.759Z",
+      "ok": true,
+      "files": [
+        "pause-mvrmjpkm-1.json"
+      ],
+      "row": {
+        "sessionId": "spike-live-turn",
+        "running": true,
+        "intent": "continue",
+        "epoch": 1,
+        "lastTurn": 2,
+        "continuedTurn": 2
+      },
+      "summaryRow": {
+        "key": "s:spike-live-turn",
+        "label": "session spike-live-turn",
+        "status": "restored",
+        "detail": "resumed and continued"
+      },
+      "note": "persisted plan row: turn continued once, same turn number, epoch 1 (no duplicate continuation)"
+    },
+    {
+      "step": "model-text-in-session",
+      "at": "2026-10-28T04:38:44.761Z",
+      "ok": true,
+      "sessionId": "spike-live-turn",
+      "mockTextOccurrences": 2
+    }
+  ],
+  "live": {
+    "id": "crash-turn-backfill",
+    "status": "verified",
+    "reason": "live Host turn: paused over HTTP, SIGKILLed, restarted, resumed exactly once; one real turn request before the crash and one continuation after it",
+    "sessionId": "spike-live-turn",
+    "beforeCrash": {
+      "request": 1,
+      "messages": 3
+    },
+    "pause": {
+      "outcome": {
+        "status": "paused",
+        "counts": {
+          "sessions": 1,
+          "goals": 0,
+          "jobs": 0
+        },
+        "outstanding": 1
+      },
+      "outstanding": 1
+    },
+    "crash": {
+      "signal": "SIGKILL",
+      "code": null
+    },
+    "afterRestart": {
+      "phase": "paused",
+      "outstanding": 1,
+      "counts": {
+        "sessions": 1,
+        "goals": 0,
+        "jobs": 0
+      }
+    },
+    "resume": {
+      "status": "resumed",
+      "summary": {
+        "planId": "pause-mvrmjpkm-1",
+        "source": "pause",
+        "restored": [
+          "session spike-live-turn"
+        ],
+        "skipped": [],
+        "failed": [],
+        "unknown": [],
+        "attention": [],
+        "rows": [
+          {
+            "key": "s:spike-live-turn",
+            "label": "session spike-live-turn",
+            "status": "restored",
+            "detail": "resumed and continued"
+          }
+        ],
+        "jobs": 0,
+        "jobsStopped": [],
+        "at": "2026-10-28T04:38:41.218Z"
+      }
+    },
+    "continuation": {
+      "request": 3,
+      "messages": 8,
+      "carriesTurnText": true
+    },
+    "plan": {
+      "status": "restored",
+      "row": {
+        "sessionId": "spike-live-turn",
+        "running": true,
+        "intent": "continue",
+        "epoch": 1,
+        "lastTurn": 2,
+        "continuedTurn": 2
+      }
+    },
+    "duplicateContinuation": false
+  },
+  "verdict": "pass",
+  "finishedAt": "2026-10-28T04:38:44.813Z"
+}

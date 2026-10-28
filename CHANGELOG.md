@@ -1,3 +1,9 @@
+## 0.6.3
+
+- The largest remaining `unverified` row is now a real run instead of a stand-in: `acceptance/host-live.mjs` boots the shipped plugin on a throwaway `DSH_HOME`, holds one real turn open with a local OpenAI-compatible mock model, pauses it over the plugin's HTTP surface, kills the Host with `SIGKILL`, restarts on the same home, resumes once and asserts that the mock received exactly one continuation carrying the original turn text, that the plan row lands at `epoch:1, lastTurn:2, continuedTurn:2`, and that no second continuation is sent. The 14 assertions run against real processes, real files and real HTTP; the model is the only stand-in, and it is labelled as such in the evidence.
+- `npm run smoke:live` reruns that gate and writes `docs/evidence/host-live.json`; the mock server (`acceptance/mock-llm.mjs`) and the spike plugin that produces the turn are kept out of the shipped package and are marked `// spike`.
+- The acceptance record now says `crash-turn-backfill` is verified on a real Host, and names the three checks that stay unverified (maintenance compaction cancellability, a stopping job visible to a person, job-only owner handoff) with the reason each needs a service this profile cannot provide.
+
 ## 0.6.2
 
 - Crash residue is continued instead of being taken for live work: a session whose disk projection still showed an open turn after the process died used to be reported as "already running", so the whole crashed set was never resumed. An open projection now proves nothing about a running turn; only a live `running` agent does, and the durable `turn/end` decides what the dead turn owes. A plan that cannot finish every row reports `partial` with a named `attention` list instead of claiming it is `paused`, and the button keeps offering resume.
