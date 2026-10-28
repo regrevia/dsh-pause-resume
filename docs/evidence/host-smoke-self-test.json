@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-10-28T07:45:32.603Z",
+  "generatedAt": "2026-10-28T09:38:46.464Z",
   "plugin": {
     "name": "dsh-pause-resume",
-    "version": "0.6.6"
+    "version": "0.6.7"
   },
   "host": {
     "electron": "/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness",
@@ -13,7 +13,7 @@
   "steps": [
     {
       "step": "self-test-fail",
-      "at": "2026-10-28T07:45:32.604Z",
+      "at": "2026-10-28T09:38:46.465Z",
       "ok": false,
       "detail": "injected failure: this step must force a non-zero exit"
     }

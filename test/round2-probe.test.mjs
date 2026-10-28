@@ -533,3 +533,88 @@ test('restoreSession() still treats a live running turn as already running, neve
     await rm(home, { recursive: true, force: true })
   }
 })
+
+test('an unknown root row whose log proves the turn was cut in flight is continued, not held forever', async () => {
+  // The reported failure: after a real restart, play moved the button but no work restarted, because
+  // every `unknown` row answered "open the session to decide" even though the persisted log already
+  // carried the reason (its latest turn ended `interrupted`). A cut turn owes its continuation.
+  const rig = turnRig({ lastTurn: 7 })
+  const live = rig.fake.live.get('s1')
+  rig.fake.services.sessionProjections = { stateOf: (session, key) => (key === 'turnBoundary' ? { lastTurn: live.phase.lastTurn, openTurnStartSeq: null } : undefined) }
+  rig.fake.services.sessionLog = { readTurnEnds: () => [{ turn: 7, kind: 'interrupted' }] }
+  rig.fake.calls.length = 0
+  const probe = createProbe(rig.fake.registry, { settleMs: 200, watchTurn: rig.watchTurn })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'unknown', epoch: 1, lastTurn: 6 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.continued, true, JSON.stringify(outcome))
+  assert.equal(outcome.status, 'restored')
+  assert.equal(outcome.turn, 8)
+  assert.equal(rig.fake.calls.filter((call) => call[0] === 'prompt').length, 1)
+})
+
+test('the cut-in-flight continuation also works from the persisted zstd log with no end service', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const sessionId = UUID()
+    await writeSessionLog(home, sessionId, [[turnEnd(4, 'interrupted')]])
+    const agent = { id: sessionId, status: 'idle', phase: { lastTurn: 4 }, session: { id: sessionId } }
+    const live = new Map([[sessionId, agent]])
+    const calls = []
+    const services = {
+      agents: { get: (id) => live.get(id), list: () => [...live.values()] },
+      sessionProjections: { stateOf: (session, key) => (key === 'turnBoundary' ? { lastTurn: agent.phase.lastTurn, openTurnStartSeq: null } : undefined) },
+      sessionController: {
+        resolveAgent: async () => agent,
+        prompt: async (request) => {
+          calls.push(['prompt', request.requestId])
+          agent.status = 'running'
+          agent.phase.lastTurn += 1
+          return { accepted: true }
+        },
+      },
+    }
+    const probe = createProbe({ get: (key) => services[key] }, { dshHome: home, settleMs: 200 })
+    const outcome = await probe.restoreSession(
+      { sessionId, intent: 'unknown', epoch: 1, lastTurn: 3 },
+      { plan: { planId: 'p1' } },
+    )
+    assert.equal(outcome.continued, true, JSON.stringify(outcome))
+    assert.equal(calls.length, 1)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('an unknown row whose latest end was an aborted turn is still held, never continued', async () => {
+  const rig = turnRig({ lastTurn: 7 })
+  rig.fake.services.sessionLog = { readTurnEnds: () => [{ turn: 7, kind: 'aborted' }] }
+  rig.fake.calls.length = 0
+  const probe = createProbe(rig.fake.registry, { settleMs: 60, watchTurn: rig.watchTurn })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'unknown', epoch: 1, lastTurn: 6 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'unknown')
+  assert.equal(outcome.continued, false)
+  assert.equal(rig.fake.calls.some((call) => call[0] === 'prompt'), false)
+})
+
+test('the stale crash end is not reported as the admitted continuation ending interrupted', async () => {
+  // Second half of the reported failure: after the continuation was actually admitted, the post-submit
+  // backfill re-read the same cut end that routed the row in and answered "continuation turn ended as
+  // interrupted" with continued:false, leaving the row for the next press to send again.
+  const rig = turnRig({ lastTurn: 7 })
+  rig.fake.services.sessionLog = { readTurnEnds: () => [{ turn: 7, kind: 'interrupted' }] }
+  rig.fake.calls.length = 0
+  const probe = createProbe(rig.fake.registry, { settleMs: 80 })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'unknown', epoch: 1, lastTurn: 6 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(rig.fake.calls.filter((call) => call[0] === 'prompt').length, 1)
+  assert.doesNotMatch(String(outcome.detail), /continuation turn ended/)
+  assert.notEqual(outcome.status, 'interrupted')
+  assert.equal(outcome.continued, true)
+})

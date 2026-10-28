@@ -1,3 +1,10 @@
+## 0.6.7
+
+- A real restart no longer leaves the button moving while nothing restarts. A crash row recorded `unknown` used to answer "turn state unknown; open the session to decide" even when the persisted session log already carried the reason: its latest turn ended `interrupted` / `blocked`, i.e. the crash cut it in flight. That is the same obligation an `interrupted` row carries, so the press now sends the continuation instead of holding the row unreadable on every press. `aborted` (a person's deliberate stop) and a missing end stay on the conservative path: no evidence is not the same as nothing to do.
+- The "a turn advanced while this plan was stopped" guard now distinguishes a clean advance from a cut one. An end that was cut in flight means nobody finished the work, so the continuation is owed; a `completed` end (or no readable end) still holds the row for the person.
+- A stale crash end is no longer counted as the continuation's own end. After admitting a continuation, the post-submit backfill re-read the same `interrupted` end that routed the row in and reported "continuation turn ended as interrupted" with `continued:false` — which left the row retryable and made the next press send the same continuation again. Only an end newer than the pre-submit evidence can now belong to the admitted turn.
+- `npm test`: 256 pass / 0 fail.
+
 ## 0.6.6
 
 - A crash row recorded `unknown` that a person continued by hand and let finish no longer stays `unknown` forever. The latest official turn end being `completed` is evidence that no turn is open, but not that the paused work was part of it, so that press now closes the row as one attention line ("a turn completed after the crash; confirm the paused work was part of it") and sends nothing. Where 0.6.5 kept reporting the row on every press until retirement, the evidence alone now settles it; a `completed` end read from the persisted session log works the same as one from the end service.

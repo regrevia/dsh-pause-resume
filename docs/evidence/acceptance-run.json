@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-10-28T07:44:30.474Z",
+  "generatedAt": "2026-10-28T09:36:47.018Z",
   "node": "v24.16.0",
-  "packageVersion": "0.6.6",
+  "packageVersion": "0.6.7",
   "coverage": {
     "real": [
       "lib/snapshot.js",
@@ -27,7 +27,7 @@
       "id": "R01-R03",
       "name": "pause persists before stop, cold boot continues every owed turn exactly once",
       "status": "pass",
-      "ms": 74,
+      "ms": 65,
       "detail": {
         "rowsOnDisk": 2,
         "continued": 2,
@@ -38,7 +38,7 @@
       "id": "R04-R06",
       "name": "crash residue restores once, then a third boot finds no work",
       "status": "pass",
-      "ms": 168,
+      "ms": 170,
       "detail": {
         "restored": 2
       }
@@ -47,7 +47,7 @@
       "id": "R06",
       "name": "pause during restore with a session that refuses to stop ends partial, not complete",
       "status": "pass",
-      "ms": 455,
+      "ms": 461,
       "detail": {
         "keptRows": 1,
         "attention": 2,
@@ -59,7 +59,7 @@
       "id": "R07",
       "name": "a pause that cannot persist stops nothing",
       "status": "pass",
-      "ms": 0,
+      "ms": 1,
       "detail": {
         "reason": "store"
       }
@@ -68,7 +68,7 @@
       "id": "R08-R10",
       "name": "a plan row without proof of its turn is held, not faked as restored",
       "status": "pass",
-      "ms": 18,
+      "ms": 20,
       "detail": {
         "status": "partial"
       }
@@ -77,7 +77,7 @@
       "id": "R13",
       "name": "a job-only plan closes with the job reported as stopped, not restarted",
       "status": "pass",
-      "ms": 38,
+      "ms": 44,
       "detail": {
         "status": "partial"
       }
@@ -86,7 +86,7 @@
       "id": "R11-R12",
       "name": "parent routes decide restore order and a lost parent is synthesized once",
       "status": "pass",
-      "ms": 3107,
+      "ms": 3120,
       "detail": {
         "order": [
           "r1",
