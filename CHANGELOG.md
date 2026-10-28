@@ -1,3 +1,11 @@
+## 0.6.8
+
+- Closing the restore gate no longer releases every parked model request at once. `unguard()` used to resolve the whole queue the moment a press returned, so a restore that parked five sessions behind a capacity of two turned them into five concurrent provider streams; the queue is now drained at the slot budget, and `abort()` closes a drained gate instead of parking the next request behind a finished batch.
+- A child row now mounts its parent instead of giving up on a cold one. With the parent agent not live, `restoreChild()` waited and then failed with "parent is not live yet" on every attempt, so a plan whose only problem was an unmounted parent kept coming back `partial`; it now calls `mount()` on the parent once (bounded), still waits, and still leaves the row retryable when the mount cannot make it live.
+- Release entrypoints are one line again. GitHub Releases now exist for `v0.6.0`–`v0.6.8`, where the Releases page had stopped at `0.5.12` while the tag and the npm package were already `0.6.x`; the code installed from the Releases page and from npm is the same release.
+- Every P1 in the latest review was re-checked against this tree and is recorded with its regression test in `docs/acceptance-0.6.8.md`. The review itself inspected main `3ac91bf` / tag `v0.5.3` / Release `0.5.2` / 168 tests, which is the pre-0.6 tree; main at that time was `b99c637` (0.6.7) with 256 tests.
+- `npm test`: 258 pass / 0 fail.
+
 ## 0.6.7
 
 - A real restart no longer leaves the button moving while nothing restarts. A crash row recorded `unknown` used to answer "turn state unknown; open the session to decide" even when the persisted session log already carried the reason: its latest turn ended `interrupted` / `blocked`, i.e. the crash cut it in flight. That is the same obligation an `interrupted` row carries, so the press now sends the continuation instead of holding the row unreadable on every press. `aborted` (a person's deliberate stop) and a missing end stay on the conservative path: no evidence is not the same as nothing to do.

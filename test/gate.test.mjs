@@ -87,16 +87,30 @@ test('two provider failures in a row cool the gate down and drop it back to one 
   assert.equal(admitted, true)
 })
 
-test('closing the gate lets every parked request through instead of pinning it', async () => {
-  const gate = createGate({ capacity: 1 })
+test('closing the gate drains parked requests at the slot budget instead of releasing them together', async () => {
+  const gate = createGate({ capacity: 2 })
   gate.guard()
-  const first = await gate.acquire({ sessionId: 's1' })
-  const queued = gate.acquire({ sessionId: 's2' })
+  const a = await gate.acquire({ sessionId: 's1' })
+  const b = await gate.acquire({ sessionId: 's2' })
+  const seen = []
+  const c = gate.acquire({ sessionId: 's3' }).then((ticket) => { seen.push('s3'); return ticket })
+  const d = gate.acquire({ sessionId: 's4' }).then((ticket) => { seen.push('s4'); return ticket })
   await tick()
   gate.unguard()
-  await queued
-  assert.equal(gate.stats().running, 1)
-  gate.release(first, 'ok')
+  await tick()
+  assert.deepEqual(seen, [], 'a closed gate must not turn the whole queue into concurrent streams')
+  assert.equal(gate.stats().draining, true)
+  gate.release(a, 'ok')
+  const cTicket = await c
+  await tick()
+  assert.deepEqual(seen, ['s3'])
+  gate.release(b, 'ok')
+  const dTicket = await d
+  gate.release(cTicket, 'ok')
+  gate.release(dTicket, 'ok')
+  assert.equal(gate.stats().draining, false)
+  assert.equal(gate.stats().enabled, false)
+  assert.equal(gate.stats().queued, 0)
 })
 
 test('a cancelled stream neither ramps nor counts as a strike', async () => {
@@ -130,4 +144,22 @@ test('two healthy streams raise the limit, and the extra slot is really used', a
   gate.release(first, 'ok')
   gate.release(second, 'ok')
   await waiting
+})
+
+test('a pause that empties a draining gate closes it instead of parking the next request', async () => {
+  const gate = createGate({ capacity: 1 })
+  gate.guard()
+  const first = await gate.acquire({ sessionId: 's1' })
+  const queued = gate.acquire({ sessionId: 's2' })
+  await tick()
+  gate.unguard()
+  gate.release(first, 'ok')
+  const second = await queued
+  gate.abort()
+  gate.release(second, 'cancelled')
+  assert.equal(gate.stats().queued, 0)
+  assert.equal(gate.stats().draining, false)
+  assert.equal(gate.stats().enabled, false)
+  const after = await gate.acquire({ sessionId: 's3' })
+  assert.deepEqual(after, { free: true }, 'a closed gate must not queue a request')
 })

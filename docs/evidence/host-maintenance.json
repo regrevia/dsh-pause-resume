@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-10-28T09:37:31.949Z",
+  "generatedAt": "2026-10-28T10:34:26.339Z",
   "kind": "host-maintenance",
   "plugin": {
     "name": "dsh-pause-resume",
-    "version": "0.6.7"
+    "version": "0.6.8"
   },
   "host": {
     "kind": "isolated-electron",
@@ -14,7 +14,7 @@
     "profile": "maint",
     "baseProfile": "web",
     "note": "throwaway DSH_HOME and OS-assigned port; the real ~/.dsh profile is not read or written",
-    "port": "http://127.0.0.1:53769"
+    "port": "http://127.0.0.1:57451"
   },
   "mock": {
     "kind": "inline openai-completions mock",
@@ -27,11 +27,11 @@
         "stream": true,
         "messages": 5,
         "lastRole": "user",
-        "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T17:37:33+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
+        "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T18:34:27+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
         "targetTurn": false,
         "summary": false,
         "held": true,
-        "finishedAt": "2026-10-28T09:37:36.467Z",
+        "finishedAt": "2026-10-28T10:34:30.618Z",
         "closed": true
       },
       {
@@ -43,7 +43,7 @@
         "targetTurn": false,
         "summary": true,
         "held": false,
-        "finishedAt": "2026-10-28T09:37:33.374Z",
+        "finishedAt": "2026-10-28T10:34:27.539Z",
         "closed": false
       },
       {
@@ -51,11 +51,11 @@
         "stream": true,
         "messages": 5,
         "lastRole": "user",
-        "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T17:37:33+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
+        "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T18:34:27+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
         "targetTurn": true,
         "summary": false,
         "held": false,
-        "finishedAt": "2026-10-28T09:37:34.181Z",
+        "finishedAt": "2026-10-28T10:34:28.339Z",
         "closed": null
       },
       {
@@ -67,7 +67,7 @@
         "targetTurn": false,
         "summary": true,
         "held": false,
-        "finishedAt": "2026-10-28T09:37:33.802Z",
+        "finishedAt": "2026-10-28T10:34:27.961Z",
         "closed": false
       },
       {
@@ -79,7 +79,7 @@
         "targetTurn": false,
         "summary": true,
         "held": false,
-        "finishedAt": "2026-10-28T09:37:36.136Z",
+        "finishedAt": "2026-10-28T10:34:30.293Z",
         "closed": false
       },
       {
@@ -104,7 +104,7 @@
   "steps": [
     {
       "step": "profile-created",
-      "at": "2026-10-28T09:37:32.073Z",
+      "at": "2026-10-28T10:34:26.446Z",
       "ok": true,
       "code": 0,
       "profile": "maint",
@@ -113,7 +113,7 @@
     },
     {
       "step": "plugin-installed",
-      "at": "2026-10-28T09:37:32.555Z",
+      "at": "2026-10-28T10:34:26.812Z",
       "ok": true,
       "code": 0,
       "plugin": "<repo>",
@@ -121,33 +121,33 @@
     },
     {
       "step": "model-overridden",
-      "at": "2026-10-28T09:37:32.560Z",
+      "at": "2026-10-28T10:34:26.816Z",
       "ok": true,
       "provider": "mock",
       "api": "openai-completions",
-      "baseURL": "http://127.0.0.1:53768/v1",
+      "baseURL": "http://127.0.0.1:57450/v1",
       "contextWindow": 8000,
       "maxTokens": 256,
       "command": "/compact"
     },
     {
       "step": "host-ready",
-      "at": "2026-10-28T09:37:33.201Z",
+      "at": "2026-10-28T10:34:27.371Z",
       "ok": true,
-      "url": "http://127.0.0.1:53769"
+      "url": "http://127.0.0.1:57451"
     },
     {
       "step": "holder-turn-observed",
-      "at": "2026-10-28T09:37:33.403Z",
+      "at": "2026-10-28T10:34:27.572Z",
       "ok": true,
       "n": 1,
       "stream": true,
-      "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T17:37:33+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
+      "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T18:34:27+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
       "held": true
     },
     {
       "step": "turn-finished",
-      "at": "2026-10-28T09:37:36.149Z",
+      "at": "2026-10-28T10:34:30.301Z",
       "ok": true,
       "sessionId": "spike-maintenance",
       "kind": "idle",
@@ -155,7 +155,7 @@
     },
     {
       "step": "maintenance-observed",
-      "at": "2026-10-28T09:37:36.454Z",
+      "at": "2026-10-28T10:34:30.605Z",
       "ok": true,
       "observedPhases": [
         "idle/idle",
@@ -167,7 +167,7 @@
         "idle/idle",
         "running/running"
       ],
-      "maintenanceAt": "2026-10-28T09:37:36.402Z",
+      "maintenanceAt": "2026-10-28T10:34:30.560Z",
       "heldRequest": {
         "n": 6,
         "stream": true,
@@ -179,7 +179,7 @@
     },
     {
       "step": "paused",
-      "at": "2026-10-28T09:37:36.565Z",
+      "at": "2026-10-28T10:34:30.700Z",
       "ok": true,
       "status": 200,
       "outcome": {
@@ -191,7 +191,7 @@
         },
         "outstanding": 1
       },
-      "pauseMs": 109,
+      "pauseMs": 94,
       "liveSessions": 0,
       "maintenanceCanceled": [
         "spike-maintenance"
@@ -222,6 +222,7 @@
           "progressive": false,
           "active": false,
           "enabled": false,
+          "draining": false,
           "capacity": 1,
           "running": 0,
           "queued": 0,
@@ -230,12 +231,12 @@
           "interrupted": 0,
           "cooldownUntil": 0
         },
-        "version": "0.6.7"
+        "version": "0.6.8"
       }
     },
     {
       "step": "maintenance-canceled-apart",
-      "at": "2026-10-28T09:37:36.565Z",
+      "at": "2026-10-28T10:34:30.700Z",
       "ok": true,
       "planFile": "snapshot.json",
       "planStatus": "paused",
@@ -256,10 +257,10 @@
     },
     {
       "step": "maintenance-cleared",
-      "at": "2026-10-28T09:37:36.565Z",
+      "at": "2026-10-28T10:34:30.700Z",
       "ok": true,
       "settled": {
-        "at": "2026-10-28T09:37:36.478Z",
+        "at": "2026-10-28T10:34:30.624Z",
         "event": "compact-settled",
         "sessionId": "spike-maintenance",
         "kind": "idle",
@@ -273,7 +274,7 @@
         }
       },
       "idleAfterPause": {
-        "at": "2026-10-28T09:37:36.482Z",
+        "at": "2026-10-28T10:34:30.628Z",
         "event": "phase",
         "sessionId": "spike-maintenance",
         "kind": "idle",
@@ -283,11 +284,11 @@
     },
     {
       "step": "pause-not-waiting",
-      "at": "2026-10-28T09:37:36.568Z",
+      "at": "2026-10-28T10:34:30.702Z",
       "ok": true,
       "phase": "paused",
       "outstanding": 1,
-      "secondPauseMs": 2,
+      "secondPauseMs": 1,
       "live": {
         "sessions": 0,
         "goals": 0,
@@ -314,7 +315,7 @@
     "holderRequest": {
       "n": 1,
       "stream": true,
-      "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T17:37:33+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
+      "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T18:34:27+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
       "held": true
     },
     "observedPhases": [
@@ -345,7 +346,7 @@
         },
         "outstanding": 1
       },
-      "pauseMs": 109
+      "pauseMs": 94
     },
     "plan": {
       "file": "snapshot.json",
@@ -368,7 +369,7 @@
     },
     "cleared": {
       "settled": {
-        "at": "2026-10-28T09:37:36.478Z",
+        "at": "2026-10-28T10:34:30.624Z",
         "event": "compact-settled",
         "sessionId": "spike-maintenance",
         "kind": "idle",
@@ -382,7 +383,7 @@
         }
       },
       "idleAfterPause": {
-        "at": "2026-10-28T09:37:36.482Z",
+        "at": "2026-10-28T10:34:30.628Z",
         "event": "phase",
         "sessionId": "spike-maintenance",
         "kind": "idle",

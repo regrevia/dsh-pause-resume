@@ -368,6 +368,25 @@ test('restoreChild() closes a hand-finished unknown child as attention, not a pr
   assert.equal(fake.calls.some((call) => call[0] === 'subagents.prompt'), false)
 })
 
+test('restoreChild() mounts a cold parent before declaring the child unrestorable', async () => {
+  // A child row whose parent is not mounted yet used to fail three times and hand the plan back as
+  // `partial`, because nothing ever called mount on the parent. The parent is a dependency of the
+  // child row, not an assumption about who pressed last.
+  const fake = harness({
+    agents: [
+      { id: 'c1', status: 'idle', phase: { lastTurn: 5 }, session: { id: 'c1', header: { parentSession: 'p1' } } },
+    ],
+  })
+  const probe = createProbe(fake.registry, { settleMs: 60 })
+  const outcome = await probe.restoreSession(
+    { sessionId: 'c1', parent: 'p1', origin: 'subagent', intent: 'continue', epoch: 1, lastTurn: 5 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(fake.calls.some((call) => call[0] === 'resolveAgent' && call[1] === 'p1'), true, 'the parent was never mounted')
+  assert.equal(outcome.status, 'restored')
+  assert.equal(fake.calls.filter((call) => call[0] === 'subagents.prompt').length, 1)
+})
+
 test('restoreChild() reports a child already running by hand as running, never as a prompt', async () => {
   const fake = harness({
     agents: [

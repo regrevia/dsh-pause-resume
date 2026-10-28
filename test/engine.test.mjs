@@ -283,6 +283,32 @@ test('resume() journals each restored item and consumes the plan only when every
   assert.equal(engine.describe().action, 'none')
 })
 
+test('a restored row is journaled with its pause cycle and the turn it actually opened', async () => {
+  const plan = {
+    version: 3, planId: 'p13', status: 'paused', source: 'pause',
+    sessions: [
+      { sessionId: 's1', running: true, lastTurn: 5, epoch: 3 },
+      { sessionId: 's2', running: true, lastTurn: 2, epoch: 1 },
+    ],
+    goals: [], jobs: [],
+  }
+  const store = fakeStore({ plan })
+  const probe = fakeProbe()
+  probe.restoreSession = async (session) => {
+    probe.calls.push(['session', session.sessionId])
+    if (session.sessionId === 's1') return { status: 'restored', detail: 'continued', turn: 7 }
+    return { status: 'failed', detail: 'REMOTE_CONFLICT' }
+  }
+  const { engine } = engineFor({ store, probe })
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'partial')
+  // The cycle and the turn are what let a later boot tell "this process admitted a turn" from
+  // "a crashed process never did"; a restored row without them was trusted across a restart and
+  // reported work complete that never ran.
+  assert.deepEqual(store.state.journal.get('s:s1'), { status: 'restored', boot: 'boot-1', epoch: 3, turn: 7 })
+  assert.equal(store.state.journal.has('s:s2'), false)
+})
+
 test('resume() keeps the plan and retries only the item that failed', async () => {
   const plan = {
     version: 2, planId: 'p1', status: 'paused', source: 'pause',
