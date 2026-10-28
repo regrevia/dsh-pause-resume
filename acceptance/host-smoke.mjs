@@ -13,7 +13,11 @@
  * reports `empty` instead of faking a restore). Live-work pause against the real Host
  * still requires a configured provider and is documented as unverified.
  *
- * Usage: node acceptance/host-smoke.mjs [--keep]
+ * Exit status is part of the contract: any step with `ok: false`, any verdict other than
+ * `pass`, or an injected failure makes the process exit non-zero. `--self-test-fail` proves
+ * that path without booting anything, so the gate itself cannot silently regress.
+ *
+ * Usage: node acceptance/host-smoke.mjs [--keep] [--self-test-fail]
  * Env: DSH_ELECTRON (override the app binary), DSH_REPO (default: repo root).
  */
 import { spawn } from 'node:child_process'
@@ -30,6 +34,17 @@ const REPO = process.env.DSH_REPO ?? ROOT
 const ELECTRON = process.env.DSH_ELECTRON ?? '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness'
 const CLI = join(dirname(ELECTRON), '..', 'Resources', 'app.asar', 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
 const KEEP = process.argv.includes('--keep')
+const SELF_TEST_FAIL = process.argv.includes('--self-test-fail')
+
+// Live-work assertions need a real turn, which needs a configured model provider. On an isolated
+// profile there is none, so these stay `unverified` with a reason instead of being reported as
+// passing Host coverage. The controllable-service evidence lives in acceptance/round2.mjs.
+const LIVE_CHECKS = [
+  { id: 'crash-turn-backfill', expectation: 'a turn interrupted by a crash is continued once after restart' },
+  { id: 'maintenance-compaction-cancellable', expectation: 'a maintenance compaction in flight is cancelled by pause' },
+  { id: 'stopping-job-visible', expectation: 'a job that is stopping shows up in the live state while stop is in flight' },
+  { id: 'job-only-owner-handoff', expectation: 'a plan with only a stopped background job hands the owner session back' },
+]
 
 if (!existsSync(ELECTRON)) throw new Error(`DSH app binary not found: ${ELECTRON}`)
 // The CLI entry lives inside app.asar, which plain Node cannot stat. Electron's fs can;
@@ -43,6 +58,11 @@ const evidence = {
   plugin: { name: manifest.name, version },
   host: { electron: ELECTRON, cli: CLI, dshHome: home, profile: 'smoke' },
   steps: [],
+  live: LIVE_CHECKS.map((check) => ({
+    ...check,
+    status: 'unverified',
+    reason: 'isolated smoke profile has no model provider, so no live turn can be produced; the same behaviour is exercised against controllable services in acceptance/round2.mjs',
+  })),
   verdict: 'fail',
 }
 
@@ -142,6 +162,13 @@ function request(host, path, { method = 'GET', header = true, origin = true, hos
 }
 
 try {
+  if (SELF_TEST_FAIL) {
+    // Failure injection: the gate under test must turn this into exit code 1. No Host is booted,
+    // because the point is the exit path, not Host coverage.
+    log('self-test-fail', { ok: false, detail: 'injected failure: this step must force a non-zero exit' })
+    evidence.verdict = 'fail'
+    evidence.selfTest = { injected: true, expectedExitCode: 1 }
+  } else {
   // 1. Compose an isolated web profile. `--from-default-profile web` alone would boot a host
   // and never return; `--dump-config` materializes the same profile and exits.
   const create = await run(['--profile', 'smoke', '--from-default-profile', 'web', '--dump-config'])
@@ -236,14 +263,19 @@ try {
   }
 
   evidence.verdict = evidence.steps.every((step) => step.ok !== false) ? 'pass' : 'fail'
+  }
 } catch (error) {
   evidence.error = String(error?.stack ?? error)
   process.exitCode = 1
 } finally {
   if (!KEEP) await rm(home, { recursive: true, force: true })
   evidence.keptHome = KEEP ? home : null
-  const outPath = join(REPO, 'docs', 'evidence', 'host-smoke.json')
+  // A pass with a recorded failure, or a non-passing verdict, must never leave exit code 0.
+  if (evidence.verdict !== 'pass' || evidence.steps.some((step) => step.ok === false)) process.exitCode = 1
+  // An injected failure is not evidence about the Host: it must never replace the real smoke
+  // record, or a later reader would see a failed verdict for a Host that actually passed.
+  const outPath = join(REPO, 'docs', 'evidence', SELF_TEST_FAIL ? 'host-smoke-self-test.json' : 'host-smoke.json')
   await mkdir(dirname(outPath), { recursive: true })
   await writeFile(outPath, `${JSON.stringify(evidence, null, 2)}\n`)
-  process.stdout.write(`\nverdict: ${evidence.verdict}\nevidence: ${outPath}\n`)
+  process.stdout.write(`\nverdict: ${evidence.verdict}\nexitCode: ${process.exitCode ?? 0}\nevidence: ${outPath}\n`)
 }

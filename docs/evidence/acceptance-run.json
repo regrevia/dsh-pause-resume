@@ -1,48 +1,72 @@
 {
-  "generatedAt": "2026-10-27T17:05:46.181Z",
+  "generatedAt": "2026-10-28T04:15:49.150Z",
   "node": "v24.16.0",
+  "packageVersion": "0.6.2",
+  "coverage": {
+    "real": [
+      "lib/snapshot.js",
+      "lib/heartbeat.js",
+      "lib/engine.js",
+      "lib/probe.js"
+    ],
+    "scripted": [
+      "agents",
+      "sessionController",
+      "goals",
+      "jobs",
+      "sessionProjections",
+      "sessionLog",
+      "subagents"
+    ],
+    "notCovered": [
+      "real Host process with a live model stream (see acceptance/host-smoke.mjs)"
+    ]
+  },
   "results": [
     {
       "id": "R01-R03",
-      "name": "pause persists before stop, cold boot continues every owed turn once",
+      "name": "pause persists before stop, cold boot continues every owed turn exactly once",
       "status": "pass",
-      "ms": 45,
+      "ms": 63,
       "detail": {
         "rowsOnDisk": 2,
-        "continued": 2
+        "continued": 2,
+        "probe": "real createProbe"
       }
     },
     {
       "id": "R04-R06",
       "name": "crash residue restores once, then a third boot finds no work",
       "status": "pass",
-      "ms": 157,
+      "ms": 164,
       "detail": {
         "restored": 2
       }
     },
     {
       "id": "R06",
-      "name": "pause during restore interrupts, keeps the plan and records the running item",
+      "name": "pause during restore with a session that refuses to stop ends partial, not complete",
       "status": "pass",
-      "ms": 32,
+      "ms": 463,
       "detail": {
         "keptRows": 1,
-        "attention": 0
+        "attention": 2,
+        "status": "partial",
+        "complete": false
       }
     },
     {
       "id": "R07",
       "name": "a pause that cannot persist stops nothing",
       "status": "pass",
-      "ms": 1,
+      "ms": 0,
       "detail": {
-        "reason": null
+        "reason": "store"
       }
     },
     {
       "id": "R08-R10",
-      "name": "a plan row the previous build could not prove is held, not faked as restored",
+      "name": "a plan row without proof of its turn is held, not faked as restored",
       "status": "pass",
       "ms": 16,
       "detail": {
@@ -53,23 +77,22 @@
       "id": "R13",
       "name": "a job-only plan closes with the job reported as stopped, not restarted",
       "status": "pass",
-      "ms": 35,
+      "ms": 28,
       "detail": {
-        "jobsStopped": 1
+        "status": "partial"
       }
     },
     {
       "id": "R11-R12",
       "name": "parent routes decide restore order and a lost parent is synthesized once",
       "status": "pass",
-      "ms": 61,
+      "ms": 3089,
       "detail": {
         "order": [
           "r1",
-          "gone",
-          "c1",
-          "c2"
-        ]
+          "c1"
+        ],
+        "status": "partial"
       }
     }
   ],

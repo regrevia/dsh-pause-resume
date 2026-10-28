@@ -193,8 +193,8 @@ npm run audit
 npm run smoke:host   # boots a throwaway real Host on a free port and asserts the routes
 ```
 
-Verification records live in `docs/acceptance-0.6.0.md` (scenario matrix and what is still
-unverified) and `docs/evidence/`. The job-lifecycle listening design review, including why a job is
+Verification records live in `docs/acceptance-0.6.2.md` (current release, scenario matrix and what
+is still unverified), `docs/acceptance-0.6.0.md` (0.6.0–0.6.1) and `docs/evidence/`. The job-lifecycle listening design review, including why a job is
 never restarted, is `docs/design/job-lifecycle.md`.
 
 `lib/engine.js` performs no I/O, `lib/snapshot.js` persists, `lib/probe.js` holds every Harness service
