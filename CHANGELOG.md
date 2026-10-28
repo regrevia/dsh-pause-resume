@@ -1,3 +1,9 @@
+## 0.6.1
+
+- A real Host, not just stand-ins: `acceptance/host-smoke.mjs` builds a throwaway profile on a fresh `DSH_HOME`, links the package, mounts it, boots the shipped web app on an OS-picked port (never the live one) and asserts 16 behaviours over real HTTP — `GET`/`HEAD /state`, reads without the button header, a forged `Origin` and a forged `Host` both refused with 403, an idle pause twice in a row honestly reporting `idle` without writing a plan, a cold restart hydrating `idle` with no restore, and a plan-less resume reporting `empty`. Evidence is written to `docs/evidence/host-smoke.json`; `npm run smoke:host` reruns it.
+- The job-lifecycle listening design is reviewed in `docs/design/job-lifecycle.md` and implemented nowhere: it records why a job is never restarted, which durable session facts would name a crash residue, and what stays `unknown` when no persistence backend is mounted. Nothing in this version changes runtime behaviour.
+- The acceptance record names what the smoke does not cover: a live turn paused on a real Host (no model credential in this environment), job restart end-to-end, crash job residue, parent-chain depth, and the progressive restore's capacity gate. The versions above are still shipped with those limits.
+
 ## 0.6.0
 
 - The plan records what a job stop actually achieved (`stopped`, `stopping`, `stop-failed`, `unknown`) beside each job row, including when a pause interrupts a restore, so "we asked it to stop" is not mistaken for "it stopped". A job still shown as running keeps the pause partial and needs a person.

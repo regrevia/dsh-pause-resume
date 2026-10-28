@@ -1,7 +1,7 @@
-# 0.6.0 验收报告：暂停与恢复可靠性收敛
+# 0.6.0–0.6.1 验收报告：暂停与恢复可靠性收敛
 
-- 候选版本：`0.6.0`（manifest 是唯一版本来源，所有响应携带该值）
-- 冻结时间：2026-10-28 01:00（Asia/Shanghai），分支 `main`
+- 候选版本：`0.6.0` 的运行时行为，`0.6.1` 追加真实 Host 冒烟（运行时代码未变；manifest 是唯一版本来源）
+- 冻结时间：2026-10-28 02:30（Asia/Shanghai），分支 `main`
 - 证据目录：`docs/evidence/acceptance-run.json`（本轮生成的原始 JSON）
 - 判定原则：只有真实执行过的场景才写 pass；未在真实 Host 上跑过的场景如实标注 unverified。
 
@@ -15,7 +15,7 @@ npm run audit                           # 静态检查
 npm pack --dry-run                      # 打包内容检查
 ```
 
-验收脚本每个场景自建 `fs.mkdtempSync` 目录，使用真实的 `lib/snapshot.js`（snapshot.json / pending.json / journal 文件）、真实的 `lib/heartbeat.js`（running.json 与跨 boot 残留）、真实的 `lib/engine.js` 与 `lib/probe.js`；只有 Host 的 agents/goals/jobs 服务是脚本化替身（Host 服务不可 import，真实 Host 冒烟另列为 unverified）。
+验收脚本每个场景自建 `fs.mkdtempSync` 目录，使用真实的 `lib/snapshot.js`（snapshot.json / pending.json / journal 文件）、真实的 `lib/heartbeat.js`（running.json 与跨 boot 残留）、真实的 `lib/engine.js` 与 `lib/probe.js`；只有 Host 的 agents/goals/jobs 服务是脚本化替身（Host 服务不可 import，真实 Host 冒烟见第 4 节，已在隔离实例上执行）。
 
 ## 2. 本轮真实执行结果
 
@@ -60,13 +60,26 @@ npm pack --dry-run                      # 打包内容检查
 | R16 | 计划跨写入/重启/迁移不变：元数据保真、journal 文件稳定 | pass | snapshot.test 23 项（迁移、metadata、幂等重写、journal 命名）；acceptance 冷启动读回同一 planId |
 | R17 | 渐进恢复默认关闭，未显式开启走普通路径且不碰容量 gate | pass | engine.test 新增默认关闭用例（`restore.progressive===false`，gate 计数全 0）与 `:1308` 显式 false 用例 |
 | R18 | 交付物自洽：版本单一来源、路由/守卫契约、入口可打包 | pass | apply/integration/client 测试；`npm run audit` 0 error；`npm pack --dry-run` 清单见第 5 节 |
+| R19 | 真实 Host 隔离冒烟：从零建 profile、装包挂载、路由与 Origin/Host 守卫、空闲暂停诚实、冷启动 hydrate、无计划恢复 | pass | `acceptance/host-smoke.mjs` 16/16，证据 `docs/evidence/host-smoke.json` |
 
 ## 4. 未验证项（诚实标注）
 
-- **真实 Host 冒烟（unverified）**：没有对正在使用的 Host 实例执行 pause/resume（那是用户当前会话，按约束不得操作）。本轮端到端使用真实存储/心跳/引擎/probe 模块 + 脚本化 Host 服务；真实 Host 上的 agents/goals/jobs 行为仍需一次隔离实例冒烟。
-- **job 的端到端重启（unverified）**：Host 没有 job 启动闭包，本版只能把停止结果写进计划并让续跑消息请求 turn 自行重启；此链路未在真实 Host 上跑过。
-- **进程死亡时的 job 残留（known gap）**：心跳残留只含 sessions/goals，不含 jobs；崩溃时在跑的 job 无法被下一次启动命名。该项作为剩余限制保留，未在本版修复。
-- **渐进恢复容量 gate（unverified）**：只在 engine 层用 stub gate 验证默认关闭与显式开启，未接真实 Host 容量信号；该能力按任务要求排在核心恢复之后，默认关闭。
+- **真实 Host 运行（pass，仅隔离实例）**：`acceptance/host-smoke.mjs` 在全新 `DSH_HOME` 上从零合成
+  profile、安装本包、写入挂载入口、启动 Host（OS 选空闲端口，不触碰 54279），用真实 HTTP 断言 16 项：
+  `GET`/`HEAD /state`、无插件头可读、伪造 `Origin`/`Host` 均 403、空闲 `POST /pause` 两次都返回
+  `idle` 且不写计划、冷启动后 `phase idle` 且 `restore null`、无计划 `POST /resume` 返回 `empty`、
+  插件日志出现 `ready (idle)`。证据：`docs/evidence/host-smoke.json`。
+- **live-work 暂停（unverified）**：本机 agent 环境没有模型凭据，无法在隔离 Host 里起一个真实回合，
+  所以「真实 Host 上暂停正在跑的 turn、kill 真正的 job」仍只有脚本化替身覆盖。空闲路径通过不等于
+  live-work 通过，这里不冒充。
+- **job 的端到端重启（unverified）**：Host 没有 job 启动闭包，本版只把停止结果写进计划，
+  由续跑消息请求 turn 自行重开；真实 Host 上这一链路未执行。监听 job 生命周期的做法只做了设计评审
+  （`docs/design/job-lifecycle.md`），代码未实施。
+- **进程死亡时的 job 残留（known gap）**：心跳残留只含 sessions/goals，不含 jobs；崩溃时在跑的 job
+  无法被下一次启动命名。设计评审给出了用持久化 `job/registered` 无 `job/settled` 作为残留证据的
+  方案，但未实施，当前仍按未知处理。
+- **渐进恢复容量 gate（unverified）**：只在 engine 层用 stub gate 验证默认关闭与显式开启，未接真实
+  Host 容量信号；该能力按任务要求排在核心恢复之后，默认关闭。
 
 ## 5. 包检查
 
@@ -81,4 +94,6 @@ npm pack --dry-run                      # 打包内容检查
 3. 父链只保证直接 parent；缺失的祖父不会被补造，旧 bare-id/v2 残留没有 parent，其子会话按根挂载。
 4. `unknown` 需要人看一眼；重复继续会保持 partial，不自动转成功。
 5. 渐进恢复默认关闭，真实 Host 容量 gate 未冒烟。
-6. 真实 Host 上的隔离 pause/resume 冒烟未执行（见第 4 节）。
+6. 真实 Host 的隔离冒烟只覆盖空闲路径（16 项通过，`docs/evidence/host-smoke.json`）；带真实回合的
+   live-work 暂停因无模型凭据仍未执行（见第 4 节）。
+7. job 生命周期监听只是评审稿（`docs/design/job-lifecycle.md`），没有实现；恢复永不重启 job。

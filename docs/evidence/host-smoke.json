@@ -1,0 +1,298 @@
+{
+  "generatedAt": "2026-10-28T02:27:31.689Z",
+  "plugin": {
+    "name": "dsh-pause-resume",
+    "version": "0.6.1"
+  },
+  "host": {
+    "electron": "/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness",
+    "cli": "/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js",
+    "dshHome": "/var/folders/jz/m25rbjt91gq8h84pjh6d4c9c0000gn/T/dsh-host-smoke-1Fqzcm",
+    "profile": "smoke"
+  },
+  "steps": [
+    {
+      "step": "create-profile",
+      "at": "2026-10-28T02:27:31.817Z",
+      "ok": true,
+      "code": 0,
+      "stderr": ""
+    },
+    {
+      "step": "install-plugin",
+      "at": "2026-10-28T02:27:32.241Z",
+      "ok": true,
+      "code": 0,
+      "stderr": ""
+    },
+    {
+      "step": "mount-entry",
+      "at": "2026-10-28T02:27:32.242Z",
+      "ok": true,
+      "patch": "- insert:\n    - id: dsh-pause-resume\n      name: 'dsh-pause-resume'"
+    },
+    {
+      "step": "boot",
+      "at": "2026-10-28T02:27:32.868Z",
+      "ok": true,
+      "url": "http://127.0.0.1:59426"
+    },
+    {
+      "step": "state-after-boot",
+      "at": "2026-10-28T02:27:32.922Z",
+      "ok": true,
+      "status": 200,
+      "body": {
+        "phase": "idle",
+        "action": "none",
+        "source": null,
+        "complete": null,
+        "outstanding": 0,
+        "counts": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "live": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "attention": 0,
+        "focus": null,
+        "error": null,
+        "result": null,
+        "restore": null,
+        "version": "0.6.1"
+      }
+    },
+    {
+      "step": "state-head",
+      "at": "2026-10-28T02:27:32.923Z",
+      "ok": true,
+      "status": 200
+    },
+    {
+      "step": "state-without-guard-header",
+      "at": "2026-10-28T02:27:32.924Z",
+      "ok": true,
+      "status": 200,
+      "body": {
+        "phase": "idle",
+        "action": "none",
+        "source": null,
+        "complete": null,
+        "outstanding": 0,
+        "counts": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "live": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "attention": 0,
+        "focus": null,
+        "error": null,
+        "result": null,
+        "restore": null,
+        "version": "0.6.1"
+      }
+    },
+    {
+      "step": "foreign-origin-rejected",
+      "at": "2026-10-28T02:27:32.924Z",
+      "ok": true,
+      "status": 403,
+      "body": {
+        "status": "forbidden"
+      }
+    },
+    {
+      "step": "foreign-host-rejected",
+      "at": "2026-10-28T02:27:32.926Z",
+      "ok": true,
+      "status": 403,
+      "body": {
+        "status": "forbidden"
+      }
+    },
+    {
+      "step": "pause-idle",
+      "at": "2026-10-28T02:27:32.927Z",
+      "ok": true,
+      "status": 200,
+      "body": {
+        "phase": "idle",
+        "action": "none",
+        "source": null,
+        "complete": null,
+        "outstanding": 0,
+        "counts": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "live": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "attention": 0,
+        "focus": null,
+        "error": null,
+        "result": null,
+        "restore": null,
+        "outcome": {
+          "status": "idle",
+          "action": "none"
+        },
+        "version": "0.6.1"
+      }
+    },
+    {
+      "step": "pause-idle-again",
+      "at": "2026-10-28T02:27:32.928Z",
+      "ok": true,
+      "status": 200,
+      "body": {
+        "phase": "idle",
+        "action": "none",
+        "source": null,
+        "complete": null,
+        "outstanding": 0,
+        "counts": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "live": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "attention": 0,
+        "focus": null,
+        "error": null,
+        "result": null,
+        "restore": null,
+        "outcome": {
+          "status": "idle",
+          "action": "none"
+        },
+        "version": "0.6.1"
+      }
+    },
+    {
+      "step": "no-plan-created-by-idle-pause",
+      "at": "2026-10-28T02:27:32.929Z",
+      "ok": true,
+      "status": 200,
+      "body": {
+        "phase": "idle",
+        "action": "none",
+        "source": null,
+        "complete": null,
+        "outstanding": 0,
+        "counts": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "live": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "attention": 0,
+        "focus": null,
+        "error": null,
+        "result": null,
+        "restore": null,
+        "version": "0.6.1"
+      }
+    },
+    {
+      "step": "state-dir",
+      "at": "2026-10-28T02:27:32.929Z",
+      "ok": true,
+      "files": [
+        "running.json"
+      ]
+    },
+    {
+      "step": "state-after-restart",
+      "at": "2026-10-28T02:27:33.646Z",
+      "ok": true,
+      "status": 200,
+      "body": {
+        "phase": "idle",
+        "action": "none",
+        "source": null,
+        "complete": null,
+        "outstanding": 0,
+        "counts": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "live": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "attention": 0,
+        "focus": null,
+        "error": null,
+        "result": null,
+        "restore": null,
+        "version": "0.6.1"
+      }
+    },
+    {
+      "step": "resume-without-plan",
+      "at": "2026-10-28T02:27:33.647Z",
+      "ok": true,
+      "status": 200,
+      "body": {
+        "phase": "idle",
+        "action": "none",
+        "source": null,
+        "complete": null,
+        "outstanding": 0,
+        "counts": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "live": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "attention": 0,
+        "focus": null,
+        "error": null,
+        "result": null,
+        "restore": null,
+        "outcome": {
+          "status": "empty"
+        },
+        "version": "0.6.1"
+      }
+    },
+    {
+      "step": "plugin-ready-line",
+      "at": "2026-10-28T02:27:33.648Z",
+      "ok": true,
+      "lines": [
+        "[dsh-pause-resume] ready (idle)",
+        "[dsh-pause-resume] resume: empty"
+      ]
+    }
+  ],
+  "verdict": "pass",
+  "keptHome": null
+}
