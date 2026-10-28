@@ -192,9 +192,10 @@ npm test
 npm run audit
 npm run smoke:host   # boots a throwaway real Host on a free port and asserts the routes
 npm run smoke:live   # real Host + local mock model stream: pause, SIGKILL, restart, resume once
+npm run smoke:maintenance  # real Host: pause cancels an in-flight compaction, apart from the session turn
 ```
 
-Verification records live in `docs/acceptance-0.6.3.md` (current release, scenario matrix and what
+Verification records live in `docs/acceptance-0.6.4.md` (current release, scenario matrix and what
 is still unverified), `docs/acceptance-0.6.0.md` (0.6.0–0.6.1) and `docs/evidence/`. The job-lifecycle listening design review, including why a job is
 never restarted, is `docs/design/job-lifecycle.md`.
 

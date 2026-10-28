@@ -42,7 +42,7 @@ const SELF_TEST_FAIL = process.argv.includes('--self-test-fail')
 // `crash-turn-backfill` is no longer listed here: acceptance/host-live.mjs verifies it end-to-end
 // against a real Host with a held mock model stream (pause -> SIGKILL -> restart -> resume).
 const LIVE_CHECKS = [
-  { id: 'maintenance-compaction-cancellable', expectation: 'a maintenance compaction in flight is cancelled by pause' },
+  { id: 'maintenance-compaction-cancellable', expectation: 'a maintenance compaction in flight is cancelled by pause', reason: 'verified on a real Host by npm run smoke:maintenance (docs/evidence/host-maintenance.json); this smoke profile cannot produce a compaction' },
   { id: 'stopping-job-visible', expectation: 'a job that is stopping shows up in the live state while stop is in flight' },
   { id: 'job-only-owner-handoff', expectation: 'a plan with only a stopped background job hands the owner session back' },
 ]
@@ -62,7 +62,7 @@ const evidence = {
   live: LIVE_CHECKS.map((check) => ({
     ...check,
     status: 'unverified',
-    reason: 'isolated smoke profile has no model provider, so no live turn can be produced; the same behaviour is exercised against controllable services in acceptance/round2.mjs',
+    reason: check.reason ?? 'isolated smoke profile has no model provider, so no live turn can be produced; the same behaviour is exercised against controllable services in acceptance/round2.mjs',
   })),
   verdict: 'fail',
 }

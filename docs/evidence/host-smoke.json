@@ -1,45 +1,45 @@
 {
-  "generatedAt": "2026-10-28T04:38:37.220Z",
+  "generatedAt": "2026-10-28T05:40:56.201Z",
   "plugin": {
     "name": "dsh-pause-resume",
-    "version": "0.6.3"
+    "version": "0.6.4"
   },
   "host": {
     "electron": "/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness",
     "cli": "/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js",
-    "dshHome": "/var/folders/jz/m25rbjt91gq8h84pjh6d4c9c0000gn/T/dsh-host-smoke-znwyZF",
+    "dshHome": "/var/folders/jz/m25rbjt91gq8h84pjh6d4c9c0000gn/T/dsh-host-smoke-wA9ZvK",
     "profile": "smoke"
   },
   "steps": [
     {
       "step": "create-profile",
-      "at": "2026-10-28T04:38:37.334Z",
+      "at": "2026-10-28T05:40:56.323Z",
       "ok": true,
       "code": 0,
       "stderr": ""
     },
     {
       "step": "install-plugin",
-      "at": "2026-10-28T04:38:37.718Z",
+      "at": "2026-10-28T05:40:56.717Z",
       "ok": true,
       "code": 0,
       "stderr": ""
     },
     {
       "step": "mount-entry",
-      "at": "2026-10-28T04:38:37.719Z",
+      "at": "2026-10-28T05:40:56.718Z",
       "ok": true,
       "patch": "- insert:\n    - id: dsh-pause-resume\n      name: 'dsh-pause-resume'"
     },
     {
       "step": "boot",
-      "at": "2026-10-28T04:38:38.314Z",
+      "at": "2026-10-28T05:40:57.330Z",
       "ok": true,
-      "url": "http://127.0.0.1:53518"
+      "url": "http://127.0.0.1:57566"
     },
     {
       "step": "state-after-boot",
-      "at": "2026-10-28T04:38:38.361Z",
+      "at": "2026-10-28T05:40:57.377Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -56,25 +56,26 @@
         "live": {
           "sessions": 0,
           "goals": 0,
-          "jobs": 0
+          "jobs": 0,
+          "maintenance": 0
         },
         "attention": 0,
         "focus": null,
         "error": null,
         "result": null,
         "restore": null,
-        "version": "0.6.3"
+        "version": "0.6.4"
       }
     },
     {
       "step": "state-head",
-      "at": "2026-10-28T04:38:38.363Z",
+      "at": "2026-10-28T05:40:57.378Z",
       "ok": true,
       "status": 200
     },
     {
       "step": "state-without-guard-header",
-      "at": "2026-10-28T04:38:38.364Z",
+      "at": "2026-10-28T05:40:57.378Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -91,19 +92,20 @@
         "live": {
           "sessions": 0,
           "goals": 0,
-          "jobs": 0
+          "jobs": 0,
+          "maintenance": 0
         },
         "attention": 0,
         "focus": null,
         "error": null,
         "result": null,
         "restore": null,
-        "version": "0.6.3"
+        "version": "0.6.4"
       }
     },
     {
       "step": "foreign-origin-rejected",
-      "at": "2026-10-28T04:38:38.364Z",
+      "at": "2026-10-28T05:40:57.379Z",
       "ok": true,
       "status": 403,
       "body": {
@@ -112,7 +114,7 @@
     },
     {
       "step": "foreign-host-rejected",
-      "at": "2026-10-28T04:38:38.366Z",
+      "at": "2026-10-28T05:40:57.381Z",
       "ok": true,
       "status": 403,
       "body": {
@@ -121,7 +123,7 @@
     },
     {
       "step": "pause-idle",
-      "at": "2026-10-28T04:38:38.367Z",
+      "at": "2026-10-28T05:40:57.382Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -138,7 +140,8 @@
         "live": {
           "sessions": 0,
           "goals": 0,
-          "jobs": 0
+          "jobs": 0,
+          "maintenance": 0
         },
         "attention": 0,
         "focus": null,
@@ -149,12 +152,12 @@
           "status": "idle",
           "action": "none"
         },
-        "version": "0.6.3"
+        "version": "0.6.4"
       }
     },
     {
       "step": "pause-idle-again",
-      "at": "2026-10-28T04:38:38.368Z",
+      "at": "2026-10-28T05:40:57.383Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -171,7 +174,8 @@
         "live": {
           "sessions": 0,
           "goals": 0,
-          "jobs": 0
+          "jobs": 0,
+          "maintenance": 0
         },
         "attention": 0,
         "focus": null,
@@ -182,12 +186,12 @@
           "status": "idle",
           "action": "none"
         },
-        "version": "0.6.3"
+        "version": "0.6.4"
       }
     },
     {
       "step": "no-plan-created-by-idle-pause",
-      "at": "2026-10-28T04:38:38.368Z",
+      "at": "2026-10-28T05:40:57.384Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -204,19 +208,20 @@
         "live": {
           "sessions": 0,
           "goals": 0,
-          "jobs": 0
+          "jobs": 0,
+          "maintenance": 0
         },
         "attention": 0,
         "focus": null,
         "error": null,
         "result": null,
         "restore": null,
-        "version": "0.6.3"
+        "version": "0.6.4"
       }
     },
     {
       "step": "state-dir",
-      "at": "2026-10-28T04:38:38.369Z",
+      "at": "2026-10-28T05:40:57.384Z",
       "ok": true,
       "files": [
         "running.json"
@@ -224,7 +229,7 @@
     },
     {
       "step": "state-after-restart",
-      "at": "2026-10-28T04:38:39.051Z",
+      "at": "2026-10-28T05:40:58.051Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -241,19 +246,20 @@
         "live": {
           "sessions": 0,
           "goals": 0,
-          "jobs": 0
+          "jobs": 0,
+          "maintenance": 0
         },
         "attention": 0,
         "focus": null,
         "error": null,
         "result": null,
         "restore": null,
-        "version": "0.6.3"
+        "version": "0.6.4"
       }
     },
     {
       "step": "resume-without-plan",
-      "at": "2026-10-28T04:38:39.052Z",
+      "at": "2026-10-28T05:40:58.052Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -270,7 +276,8 @@
         "live": {
           "sessions": 0,
           "goals": 0,
-          "jobs": 0
+          "jobs": 0,
+          "maintenance": 0
         },
         "attention": 0,
         "focus": null,
@@ -280,12 +287,12 @@
         "outcome": {
           "status": "empty"
         },
-        "version": "0.6.3"
+        "version": "0.6.4"
       }
     },
     {
       "step": "plugin-ready-line",
-      "at": "2026-10-28T04:38:39.052Z",
+      "at": "2026-10-28T05:40:58.052Z",
       "ok": true,
       "lines": [
         "[dsh-pause-resume] ready (idle)",
@@ -297,8 +304,8 @@
     {
       "id": "maintenance-compaction-cancellable",
       "expectation": "a maintenance compaction in flight is cancelled by pause",
-      "status": "unverified",
-      "reason": "isolated smoke profile has no model provider, so no live turn can be produced; the same behaviour is exercised against controllable services in acceptance/round2.mjs"
+      "reason": "verified on a real Host by npm run smoke:maintenance (docs/evidence/host-maintenance.json); this smoke profile cannot produce a compaction",
+      "status": "unverified"
     },
     {
       "id": "stopping-job-visible",

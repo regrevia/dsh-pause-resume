@@ -50,12 +50,12 @@ function fakeStore({ plan = null, journal = [], failWrite = false, failWriteAfte
     clearJournal: () => {
       state.journal.clear()
     },
-    consume: (next, summary) => {
+    consume: (next, summary, status = 'restored') => {
       if (state.failConsume === true) return { ok: false, archivePath: null, published: false }
-      state.consumed = { plan: next, summary }
+      state.consumed = { plan: next, summary, status }
       state.plan = null
       state.journal.clear()
-      state.result = { planId: next.planId, status: 'restored', summary }
+      state.result = { planId: next.planId, status, summary }
       return { ok: true, archivePath: '/tmp/restores/x.json', published: true }
     },
   }
@@ -1828,4 +1828,69 @@ test('the progressive restore stays off unless the setting is explicitly enabled
   assert.equal(gate.guarded, 0)
   assert.equal(gate.unguarded, 0)
   assert.equal(gate.aborted, 0)
+})
+
+test('a restore whose rows stay unreadable retires as partial instead of pressing forever', async () => {
+  const live = { readable: true, sessions: [], goals: [], jobs: [] }
+  const probe = fakeProbe(live)
+  probe.restoreSession = async () => ({ status: 'unknown', detail: 'turn state unknown; open the session to decide' })
+  const plan = {
+    version: 3,
+    planId: 'crash-unknown-1',
+    status: 'paused',
+    source: 'crash',
+    createdAt: '1970-01-01T00:00:00.000Z',
+    sessions: [{ sessionId: 's1', running: false, lastTurn: 3, intent: 'unknown', epoch: 0, crash: true }],
+    goals: [],
+    jobs: [],
+    attention: [],
+  }
+  const store = fakeStore()
+  store.state.pending = plan
+  const { engine } = engineFor({ store, probe })
+  const first = await engine.resume()
+  assert.equal(first.status, 'partial')
+  assert.equal(store.state.pending.status, 'paused')
+  assert.equal(store.state.pending.restore.unknownAttempts, 1)
+  assert.equal(engine.describe().action, 'resume')
+  const second = await engine.resume()
+  assert.equal(second.status, 'partial')
+  assert.equal(second.summary.attention.length, 1)
+  assert.equal(store.state.plan, null)
+  assert.equal(store.state.pending, null)
+  assert.equal(store.state.result.status, 'partial')
+  const state = engine.describe()
+  assert.equal(state.action, 'none')
+  assert.equal(state.phase, 'idle')
+  assert.equal(state.attention, 1)
+})
+
+test('a late readable row is still restored once, so retirement waits for real progress', async () => {
+  const live = { readable: true, sessions: [], goals: [], jobs: [] }
+  const probe = fakeProbe(live)
+  let call = 0
+  probe.restoreSession = async () => {
+    call += 1
+    if (call === 1) return { status: 'unknown', detail: 'turn state unknown' }
+    return { status: 'skipped', detail: 'turn completed before this restart', continued: false }
+  }
+  const plan = {
+    version: 3,
+    planId: 'crash-unknown-2',
+    status: 'paused',
+    source: 'crash',
+    createdAt: '1970-01-01T00:00:00.000Z',
+    sessions: [{ sessionId: 's1', running: false, lastTurn: 3, intent: 'unknown', epoch: 0, crash: true }],
+    goals: [],
+    jobs: [],
+    attention: [],
+  }
+  const store = fakeStore()
+  store.state.pending = plan
+  const { engine } = engineFor({ store, probe })
+  assert.equal((await engine.resume()).status, 'partial')
+  const second = await engine.resume()
+  assert.equal(second.status, 'resumed')
+  assert.equal(store.state.pending, null)
+  assert.equal(store.state.result.status, 'restored')
 })

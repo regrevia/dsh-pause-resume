@@ -1,19 +1,19 @@
 {
-  "generatedAt": "2026-10-28T04:38:37.175Z",
+  "generatedAt": "2026-10-28T05:40:58.138Z",
   "plugin": {
     "name": "dsh-pause-resume",
-    "version": "0.6.3"
+    "version": "0.6.4"
   },
   "host": {
     "electron": "/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness",
     "cli": "/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js",
-    "dshHome": "/var/folders/jz/m25rbjt91gq8h84pjh6d4c9c0000gn/T/dsh-host-smoke-UaRTUZ",
+    "dshHome": "/var/folders/jz/m25rbjt91gq8h84pjh6d4c9c0000gn/T/dsh-host-smoke-0uaE9T",
     "profile": "smoke"
   },
   "steps": [
     {
       "step": "self-test-fail",
-      "at": "2026-10-28T04:38:37.176Z",
+      "at": "2026-10-28T05:40:58.138Z",
       "ok": false,
       "detail": "injected failure: this step must force a non-zero exit"
     }
@@ -22,8 +22,8 @@
     {
       "id": "maintenance-compaction-cancellable",
       "expectation": "a maintenance compaction in flight is cancelled by pause",
-      "status": "unverified",
-      "reason": "isolated smoke profile has no model provider, so no live turn can be produced; the same behaviour is exercised against controllable services in acceptance/round2.mjs"
+      "reason": "verified on a real Host by npm run smoke:maintenance (docs/evidence/host-maintenance.json); this smoke profile cannot produce a compaction",
+      "status": "unverified"
     },
     {
       "id": "stopping-job-visible",

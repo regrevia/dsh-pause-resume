@@ -1,0 +1,394 @@
+{
+  "generatedAt": "2026-10-28T05:40:36.722Z",
+  "kind": "host-maintenance",
+  "plugin": {
+    "name": "dsh-pause-resume",
+    "version": "0.6.4"
+  },
+  "host": {
+    "kind": "isolated-electron",
+    "electron": "/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness",
+    "cli": "/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js",
+    "dshHome": "/var/folders/jz/m25rbjt91gq8h84pjh6d4c9c0000gn/T/dsh-host-maint-mJWcQv",
+    "dshHomeRetained": false,
+    "profile": "maint",
+    "baseProfile": "web",
+    "note": "throwaway DSH_HOME and OS-assigned port; the real ~/.dsh profile is not read or written",
+    "port": "http://127.0.0.1:57349"
+  },
+  "mock": {
+    "kind": "inline openai-completions mock",
+    "turn": "a holder session streams a long answer and stays open: the pause needs a real running turn to capture",
+    "target": "the maintenance target streams a long answer and finishes (compactNow needs an idle agent)",
+    "summary": "the compaction summarization request streams a short summary in delayed pieces, held=false, so no request stalls",
+    "requests": [
+      {
+        "n": 1,
+        "stream": true,
+        "messages": 5,
+        "lastRole": "user",
+        "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T13:40:37+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
+        "targetTurn": false,
+        "summary": false,
+        "held": true,
+        "finishedAt": "2026-10-28T05:40:41.118Z",
+        "closed": true
+      },
+      {
+        "n": 2,
+        "stream": true,
+        "messages": 2,
+        "lastRole": "user",
+        "lastText": "Generate the session title from this JSON array of human messages:\n[{\"seq\":8,\"text\":\"hold this turn open until the pause arrives\"}]",
+        "targetTurn": false,
+        "summary": true,
+        "held": false,
+        "finishedAt": "2026-10-28T05:40:38.034Z",
+        "closed": false
+      },
+      {
+        "n": 3,
+        "stream": true,
+        "messages": 5,
+        "lastRole": "user",
+        "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T13:40:38+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
+        "targetTurn": true,
+        "summary": false,
+        "held": false,
+        "finishedAt": "2026-10-28T05:40:38.840Z",
+        "closed": null
+      },
+      {
+        "n": 4,
+        "stream": true,
+        "messages": 2,
+        "lastRole": "user",
+        "lastText": "Generate the session title from this JSON array of human messages:\n[{\"seq\":8,\"text\":\"maintenance compaction acceptance task\"}]",
+        "targetTurn": false,
+        "summary": true,
+        "held": false,
+        "finishedAt": "2026-10-28T05:40:38.457Z",
+        "closed": false
+      },
+      {
+        "n": 5,
+        "stream": true,
+        "messages": 5,
+        "lastRole": "user",
+        "lastText": "You are now acting as a compaction engine for this AI coding assistant. Condense the conversation ABOVE into a structured checkpoint that lets another model resume the work with no loss of essential c",
+        "targetTurn": false,
+        "summary": true,
+        "held": false,
+        "finishedAt": "2026-10-28T05:40:40.795Z",
+        "closed": false
+      },
+      {
+        "n": 6,
+        "stream": true,
+        "messages": 5,
+        "lastRole": "user",
+        "lastText": "You are now acting as a compaction engine for this AI coding assistant. Condense the conversation ABOVE into a structured checkpoint that lets another model resume the work with no loss of essential c",
+        "targetTurn": false,
+        "summary": true,
+        "held": false,
+        "finishedAt": null,
+        "closed": null
+      }
+    ]
+  },
+  "spike": {
+    "file": "inline in acceptance/host-maintenance.mjs, written to <home>/spike/spike-maint-observer.mjs",
+    "note": "creates one Session through the public agents service, finishes one turn, then runs the real /compact command through commands.execute"
+  },
+  "observation": "agent.phase.kind sampled by the spike observer inside the Host; plan.stopped.maintenance read back from the persisted pause plan",
+  "steps": [
+    {
+      "step": "profile-created",
+      "at": "2026-10-28T05:40:36.854Z",
+      "ok": true,
+      "code": 0,
+      "profile": "maint",
+      "from": "web",
+      "stderr": ""
+    },
+    {
+      "step": "plugin-installed",
+      "at": "2026-10-28T05:40:37.268Z",
+      "ok": true,
+      "code": 0,
+      "plugin": "/Users/apple/Desktop/DSH/dsh-pause-resume",
+      "stderr": ""
+    },
+    {
+      "step": "model-overridden",
+      "at": "2026-10-28T05:40:37.274Z",
+      "ok": true,
+      "provider": "mock",
+      "api": "openai-completions",
+      "baseURL": "http://127.0.0.1:57348/v1",
+      "contextWindow": 8000,
+      "maxTokens": 256,
+      "command": "/compact"
+    },
+    {
+      "step": "host-ready",
+      "at": "2026-10-28T05:40:37.861Z",
+      "ok": true,
+      "url": "http://127.0.0.1:57349"
+    },
+    {
+      "step": "holder-turn-observed",
+      "at": "2026-10-28T05:40:38.062Z",
+      "ok": true,
+      "n": 1,
+      "stream": true,
+      "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T13:40:37+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
+      "held": true
+    },
+    {
+      "step": "turn-finished",
+      "at": "2026-10-28T05:40:40.801Z",
+      "ok": true,
+      "sessionId": "spike-maintenance",
+      "kind": "idle",
+      "status": "idle"
+    },
+    {
+      "step": "maintenance-observed",
+      "at": "2026-10-28T05:40:41.106Z",
+      "ok": true,
+      "observedPhases": [
+        "idle/idle",
+        "running/running",
+        "idle/idle",
+        "maintenance/idle"
+      ],
+      "holderPhases": [
+        "idle/idle",
+        "running/running"
+      ],
+      "maintenanceAt": "2026-10-28T05:40:41.051Z",
+      "heldRequest": {
+        "n": 6,
+        "stream": true,
+        "messages": 5,
+        "lastText": "You are now acting as a compaction engine for this AI coding assistant. Condense the conversation ABOVE into a structured checkpoint that lets another model resume the work with no loss of essential c",
+        "summary": true,
+        "held": false
+      }
+    },
+    {
+      "step": "paused",
+      "at": "2026-10-28T05:40:41.203Z",
+      "ok": true,
+      "status": 200,
+      "outcome": {
+        "status": "paused",
+        "counts": {
+          "sessions": 1,
+          "goals": 0,
+          "jobs": 0
+        },
+        "outstanding": 1
+      },
+      "pauseMs": 96,
+      "liveSessions": 0,
+      "maintenanceCanceled": [
+        "spike-maintenance"
+      ],
+      "accepted": "paused with no live session and a canceled maintenance row, or a partial stop recorded as observed",
+      "state": {
+        "phase": "paused",
+        "action": "resume",
+        "source": "pause",
+        "complete": true,
+        "outstanding": 1,
+        "counts": {
+          "sessions": 1,
+          "goals": 0,
+          "jobs": 0
+        },
+        "live": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0,
+          "maintenance": 0
+        },
+        "attention": 0,
+        "focus": null,
+        "error": null,
+        "result": null,
+        "restore": {
+          "progressive": false,
+          "active": false,
+          "enabled": false,
+          "capacity": 1,
+          "running": 0,
+          "queued": 0,
+          "dispatched": 0,
+          "failed": 0,
+          "interrupted": 0,
+          "cooldownUntil": 0
+        },
+        "version": "0.6.4"
+      }
+    },
+    {
+      "step": "maintenance-canceled-apart",
+      "at": "2026-10-28T05:40:41.203Z",
+      "ok": true,
+      "planFile": "snapshot.json",
+      "planStatus": "paused",
+      "stoppedMaintenance": {
+        "canceled": [
+          "spike-maintenance"
+        ],
+        "errors": []
+      },
+      "holderCaptured": true,
+      "sessions": [
+        {
+          "sessionId": "spike-holding",
+          "kind": null,
+          "status": null
+        }
+      ]
+    },
+    {
+      "step": "maintenance-cleared",
+      "at": "2026-10-28T05:40:41.204Z",
+      "ok": true,
+      "settled": {
+        "at": "2026-10-28T05:40:41.125Z",
+        "event": "compact-settled",
+        "sessionId": "spike-maintenance",
+        "kind": "idle",
+        "keys": [
+          "commandId",
+          "result"
+        ],
+        "result": {
+          "kind": "error",
+          "text": "Compaction cancelled."
+        }
+      },
+      "idleAfterPause": {
+        "at": "2026-10-28T05:40:41.125Z",
+        "event": "phase",
+        "sessionId": "spike-maintenance",
+        "kind": "idle",
+        "status": "idle"
+      },
+      "note": "the in-flight compaction no longer runs after the pause, and the pause returned without waiting for the held summarization stream"
+    },
+    {
+      "step": "pause-not-waiting",
+      "at": "2026-10-28T05:40:41.205Z",
+      "ok": true,
+      "phase": "paused",
+      "outstanding": 1,
+      "secondPauseMs": 1,
+      "live": {
+        "sessions": 0,
+        "goals": 0,
+        "jobs": 0,
+        "maintenance": 0
+      },
+      "counts": {
+        "sessions": 1,
+        "goals": 0,
+        "jobs": 0
+      },
+      "secondPause": {
+        "status": "already",
+        "phase": "paused"
+      }
+    }
+  ],
+  "maintenance": {
+    "id": "maintenance-compaction-cancellable",
+    "status": "verified",
+    "reason": "real maintenance compaction over a live Host: phase.kind maintenance observed, paused over HTTP, canceled apart from sessions; observed phase.kind maintenance and the persisted plan's stopped.maintenance row",
+    "sessionId": "spike-maintenance",
+    "holderSessionId": "spike-holding",
+    "holderRequest": {
+      "n": 1,
+      "stream": true,
+      "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T13:40:37+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
+      "held": true
+    },
+    "observedPhases": [
+      "idle/idle",
+      "running/running",
+      "idle/idle",
+      "maintenance/idle"
+    ],
+    "holderPhases": [
+      "idle/idle",
+      "running/running"
+    ],
+    "summarizationRequest": {
+      "n": 6,
+      "stream": true,
+      "messages": 5,
+      "lastText": "You are now acting as a compaction engine for this AI coding assistant. Condense the conversation ABOVE into a structured checkpoint that lets another model resume the work with no loss of essential c",
+      "held": false
+    },
+    "pause": {
+      "status": 200,
+      "outcome": {
+        "status": "paused",
+        "counts": {
+          "sessions": 1,
+          "goals": 0,
+          "jobs": 0
+        },
+        "outstanding": 1
+      },
+      "pauseMs": 96
+    },
+    "plan": {
+      "file": "snapshot.json",
+      "status": "paused",
+      "stoppedMaintenance": {
+        "canceled": [
+          "spike-maintenance"
+        ],
+        "errors": []
+      },
+      "sessions": [
+        {
+          "sessionId": "spike-holding",
+          "running": true,
+          "intent": "continue",
+          "epoch": 1,
+          "lastTurn": 1
+        }
+      ]
+    },
+    "cleared": {
+      "settled": {
+        "at": "2026-10-28T05:40:41.125Z",
+        "event": "compact-settled",
+        "sessionId": "spike-maintenance",
+        "kind": "idle",
+        "keys": [
+          "commandId",
+          "result"
+        ],
+        "result": {
+          "kind": "error",
+          "text": "Compaction cancelled."
+        }
+      },
+      "idleAfterPause": {
+        "at": "2026-10-28T05:40:41.125Z",
+        "event": "phase",
+        "sessionId": "spike-maintenance",
+        "kind": "idle",
+        "status": "idle"
+      }
+    }
+  },
+  "verdict": "pass"
+}
