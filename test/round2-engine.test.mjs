@@ -414,7 +414,7 @@ test('the job handoff row reaches the store before its continuation is delivered
       // A second process must be able to read the obligation while the first one is delivering it.
       // Cloned at call time: the engine mutates the plan rows in place during the press.
       seenAtDelivery = structuredClone(store.read())
-      return { status: 'restored', turn: 4, detail: 'continued', continued: true }
+      return { status: 'restored', turn: 4, detail: 'continued', continued: true, requestId: 'plan:continue:owner:1' }
     },
   })
   const { engine } = engineFor({ store, probe })
@@ -435,6 +435,24 @@ test('the job handoff row reaches the store before its continuation is delivered
   assert.equal(keptRow?.handoffPhase, 'delivered', 'delivery is recorded so the next boot can check it')
   assert.equal(keptRow?.deliveredTurn, 4)
   assert.equal(kept.status, 'partial')
+})
+
+test('a handoff is not marked delivered without proof that this restore sent a request', async () => {
+  const plan = pausedPlan({
+    sessions: [{ sessionId: 'owner', intent: 'continue', epoch: 1, running: false, lastTurn: null, handoff: 'job', handoffPhase: 'pending', job: { id: 'j1' } }],
+    jobs: [{ id: 'j1', owner: 'owner', status: 'running', stop: 'stopped' }],
+  })
+  const store = fakeStore({ plan })
+  // A mount-only answer reports `continued` because the owner is live, but nothing was submitted by
+  // this restore. Spending the obligation here would silently drop the one message the job owed.
+  const probe = probeFor({ restoreSession: async () => ({ status: 'restored', turn: 4, detail: 'already running', continued: true }) })
+  const { engine } = engineFor({ store, probe })
+  const result = await engine.resume()
+  assert.equal(result.status, 'partial')
+  const row = store.read()?.sessions.find((item) => item.sessionId === 'owner')
+  assert.equal(row?.handoffPhase, 'pending', 'only a real request spends the pending obligation')
+  assert.equal(row?.deliveredTurn, undefined)
+  assert.equal(store.state.consumed, null)
 })
 
 // §2.6 — delivery is not acknowledgement. Only a completed handoff turn at the delivered turn spends
@@ -470,7 +488,7 @@ test('a pending handoff with an old completed owner turn is still delivered once
       seen = { ...session }
       // The owner's old turn 3 completed before the pause. A compliant probe still delivers the
       // handoff once instead of calling the pre-pause turn proof.
-      return { status: 'restored', turn: 3, detail: 'continued', continued: true }
+      return { status: 'restored', turn: 3, detail: 'continued', continued: true, requestId: 'plan:continue:owner:1' }
     },
   })
   const { engine } = engineFor({ store, probe })
@@ -536,7 +554,7 @@ test('two boots keep the handoff obligation until the delivered turn settles', a
   const first = engineFor({
     store,
     bootId: 'boot-1',
-    probe: probeFor({ restoreSession: async () => ({ status: 'restored', turn: 3, detail: 'continued', continued: true }) }),
+    probe: probeFor({ restoreSession: async () => ({ status: 'restored', turn: 3, detail: 'continued', continued: true, requestId: 'plan:continue:owner:1' }) }),
   })
   const one = await first.engine.resume()
   assert.equal(one.status, 'partial')
@@ -603,6 +621,33 @@ test('a stale pending goal that cannot be reconciled keeps its tracking and repo
   assert.deepEqual(store.read().goals[0].pendingRestore, { revision: 5, expect: 6, at: '2023-11-14T22:00:00.000Z' })
   assert.equal(probe.calls.some((call) => call[0] === 'restoreGoal'), false)
   assert.equal(result.summary.failed.some((line) => /stale restore intent not reconciled/.test(line)), true)
+})
+
+test('a pending goal that moved without a checkpoint is re-read and given a fresh intent', async () => {
+  const plan = pausedPlan({
+    // The row never changed, so comparing intent to the row cannot detect that the goal itself has
+    // advanced past it. Only reading the goal can, and that is what makes the next restart possible.
+    goals: [{ sessionId: 's1', goalId: 'g1', revision: 7, pendingRestore: { revision: 7, expect: 8, at: 'x' } }],
+  })
+  const store = fakeStore({ plan })
+  let armedWith = null
+  const probe = probeFor({
+    prepareGoal: async () => ({ status: 'ready', revision: 9 }),
+    restoreGoal: async (goal) => {
+      armedWith = goal.pendingRestore ?? null
+      return { status: 'restored', revision: 10 }
+    },
+  })
+  const { engine } = engineFor({ store, probe })
+  const result = await engine.resume()
+
+  assert.equal(result.status, 'resumed')
+  assert.equal(probe.calls.some((call) => call[0] === 'prepareGoal'), true, 'a pending row is still verified')
+  assert.equal(armedWith?.revision, 9)
+  assert.equal(armedWith?.expect, 10)
+  const row = store.state.consumed?.plan?.goals?.find((item) => item.goalId === 'g1')
+  assert.equal(row?.armedRevision, 10)
+  assert.equal(row?.pendingRestore ?? null, null)
 })
 
 test('a checkpoint write failure after the second rearm keeps the fresh intent on disk', async () => {

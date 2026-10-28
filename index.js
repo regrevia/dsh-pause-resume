@@ -185,7 +185,15 @@ function serve(ctx, engine, heartbeat, ledger, options, ready) {
         if (now.action !== 'continue') {
           return sendJson(res, 409, { ...now, outcome: { status: now.action === 'busy' ? 'busy' : 'empty' } })
         }
-        const outcome = await ledger.continueAll()
+        // A continue press is a restore batch like any other: the same gate bounds its provider
+        // requests, so six rows cannot open six streams while the resume path may open only two.
+        if (options.progressive === true) options.gate.guard()
+        let outcome = null
+        try {
+          outcome = await ledger.continueAll()
+        } finally {
+          if (options.progressive === true) options.gate.unguard()
+        }
         log(`continue: ${outcome.status} (${outcome.continued}/${outcome.attempted})`)
         sendJson(res, 200, { ...stateOf(), outcome })
       }, false),
@@ -193,10 +201,29 @@ function serve(ctx, engine, heartbeat, ledger, options, ready) {
     [
       `${BASE_PATH}/pause`,
       route(async (req, res) => {
+        // A continue batch is work too. Cancel it before the pause reports success, and wait for it
+        // to unwind so no queued row can start after the person was told everything stopped.
+        const continues = { cancelled: false, drained: true, started: [] }
+        if (ledger.inFlight() === true) {
+          continues.cancelled = ledger.cancel() === true
+          try {
+            options.gate.abort()
+          } catch {
+            /* the gate may already be disposed */
+          }
+          continues.drained = await ledger.drain(8000)
+        }
         const outcome = await engine.pause()
-        log(`pause: ${outcome.status}${outcome.status === 'busy' ? ` (${outcome.phase})` : ''}`)
+        if (continues.cancelled) {
+          try {
+            continues.started = ledger.startedIds()
+          } catch {
+            continues.started = []
+          }
+        }
+        log(`pause: ${outcome.status}${outcome.status === 'busy' ? ` (${outcome.phase})` : ''}${continues.cancelled ? `, continue cancelled (${continues.started.length} started)` : ''}`)
         if (outcome.status === 'paused' || outcome.status === 'partial') heartbeat.release()
-        sendJson(res, 200, { ...engine.describe(), outcome, version: VERSION })
+        sendJson(res, 200, { ...engine.describe(), outcome: { ...outcome, continues }, version: VERSION })
       }, false),
     ],
     [
@@ -258,6 +285,7 @@ export function apply(ctx, config = {}) {
     log,
   })
   let engineRef = null
+  let ledgerRef = null
   const probe = createProbe(ctx, {
     isCurrent: () => currentEpoch() === epoch,
     // Reached only for rows discovered after the capture: the plan must hold them before the probe
@@ -279,7 +307,15 @@ export function apply(ctx, config = {}) {
       } catch {
         /* the gate may already be disposed */
       }
-      return engineRef?.recordAdmission(sessionId, requestId) !== false
+      // The synthetic continue plan has no engine row, so the ledger owns its admission. The engine
+      // still owns every real restore row: falling back on its behalf would hide a persist failure.
+      if (engineRef?.ownsAdmission?.(sessionId) === true) {
+        return engineRef.recordAdmission(sessionId, requestId) !== false
+      }
+      return ledgerRef?.noteAdmitted?.(sessionId, requestId) === true
+    },
+    onStarted: (sessionId) => {
+      ledgerRef?.noteStarted?.(sessionId)
     },
     // The shipped controller emits `turn/start` synchronously inside `prompt()`, before the caller
     // learns the request was admitted. Reserving the pending start immediately before the prompt is
@@ -308,6 +344,7 @@ export function apply(ctx, config = {}) {
    * person is looking at.
    */
   const ledger = createLedger({ dir, probe, log })
+  ledgerRef = ledger
   let disposeLedger = () => {}
   if (typeof ctx.on === 'function') {
     try {
@@ -511,7 +548,7 @@ export function apply(ctx, config = {}) {
   let routeDispose = () => {}
   let injectDispose = () => {}
   const mount = (scope) => {
-    routeDispose = serve(scope, engine, heartbeat, ledger, { allowRemote }, ready)
+    routeDispose = serve(scope, engine, heartbeat, ledger, { allowRemote, progressive, gate }, ready)
     if (disposed) {
       routeDispose()
       routeDispose = () => {}

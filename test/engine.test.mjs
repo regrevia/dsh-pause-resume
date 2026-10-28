@@ -1527,6 +1527,8 @@ test('a continuation is written to its row before anything waits for its turn', 
   })
   const { engine } = engineFor({ store })
   await engine.hydrate({ residue: null })
+  assert.equal(engine.ownsAdmission('s1'), true, 'the plan row is the engine-owned admission')
+  assert.equal(engine.ownsAdmission('s9'), false)
   assert.equal(engine.recordAdmission('s1', 'continue:p1:s1:1:0'), true)
   assert.equal(store.state.plan.sessions[0].admittedRequest, 'continue:p1:s1:1:0')
   // A row this plan does not name cannot be acknowledged, and saying otherwise would let the probe

@@ -97,6 +97,12 @@ session is already open, when the goal is active, when the session is gone, or w
 turn completes. Title comes from the session's own title event; nothing is loaded just to name a
 row. The batch is capped at 40 rows, and a row keeps its attempt number across failed presses.
 
+Each row is labelled for display only: `blocking` when it already needs a person or its error code is
+one a retry cannot fix (auth, permission, quota, unknown model, context length), `actionable` otherwise.
+`pendingContinue` carries both counts next to `count`, so failed work stays visible while a batch is
+running; the label never hides a row and never changes what a press does — one press still continues
+every visible row.
+
 Starting a new message in a session that has a waiting row is a takeover: it clears that row without
 claiming anything about the old work. Work continues only after a press, never on plugin load, never
 on a timer, and never because the previous batch failed.
@@ -231,9 +237,10 @@ npm run smoke:live   # real Host + local mock model stream: pause, SIGKILL, rest
 npm run smoke:maintenance  # real Host: pause cancels an in-flight compaction, apart from the session turn
 ```
 
-Verification records live in `docs/acceptance-0.6.10.md` (current release: self-stopped turns, the one
-continue press, and the reliability work carried with it, with the proven and unproven halves kept
-apart), `docs/acceptance-0.6.9.md` (the ten defects from the previous review), `docs/acceptance-0.6.7.md` (a crash press that moved the
+Verification records live in `docs/acceptance-0.6.11.md` (current release: repeated failures stay
+continuable, a pause truncates a running batch, admission ownership, handoff proof, cold/stale goal
+recovery, continue behind the progressive gate, and blocking vs actionable rows, with the proven and
+unproven halves kept apart), `docs/acceptance-0.6.10.md` (self-stopped turns and the one continue press), `docs/acceptance-0.6.9.md` (the ten defects from the previous review), `docs/acceptance-0.6.7.md` (a crash press that moved the
 button without restarting anything), `docs/acceptance-0.6.6.md` (an `unknown` row a person
 continued by hand and finished, child rows honouring the same intents as roots, the race window, and
 what is still unverified), `docs/acceptance-0.6.5.md` (0.6.5), `docs/acceptance-0.6.0.md` (0.6.0–0.6.1)

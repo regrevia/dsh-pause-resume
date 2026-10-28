@@ -59,6 +59,37 @@ test('a final error or max-tokens end becomes one row after it settles', () => {
   assert.equal(r.state().tasks[0].sessionId, 's2', 'newest first')
 })
 
+test('a permanent failure and a transient one are told apart without hiding either', () => {
+  const r = rig()
+  r.push('s1', r.end(1, 'error', { error: { message: 'invalid api key', code: 'AUTH', status: 401 } }))
+  r.push('s2', r.end(1, 'error', { error: { message: 'upstream 502', code: 'SERVER', status: 502 } }))
+  r.advance(1600)
+  const state = r.state()
+  assert.equal(state.count, 2, 'both failures stay in the one list')
+  assert.equal(state.actionable, 1)
+  assert.equal(state.blocking, 1)
+  const auth = state.tasks.find((task) => task.sessionId === 's1')
+  const server = state.tasks.find((task) => task.sessionId === 's2')
+  assert.equal(auth.blocking, true, 'a key problem cannot be fixed by pressing again')
+  assert.equal(auth.actionable, false)
+  assert.equal(server.blocking, false, 'a 502 is worth another press')
+  assert.equal(server.actionable, true)
+})
+
+test('a row that already needed a person stays blocking after it is shown again', () => {
+  const r = rig({ session: { status: 'failed', detail: '目标不可读' } })
+  r.push('s1', r.end(1, 'error', { error: { message: 'upstream 502', code: 'SERVER', status: 502 } }))
+  r.advance(1600)
+  return r.ledger.continueAll().then((outcome) => {
+    assert.equal(outcome.status, 'accepted')
+    const state = r.state()
+    assert.equal(state.count, 1, 'a failed continuation stays visible')
+    assert.equal(state.tasks[0].status, 'attention')
+    assert.equal(state.tasks[0].blocking, true)
+    assert.equal(state.actionable, 0)
+  })
+})
+
 test('a deliberate end clears the row, and a later start clears work already picked up', () => {
   for (const kind of ['completed', 'aborted', 'interrupted', 'blocked']) {
     const r = rig()
@@ -193,6 +224,48 @@ test('one press is one batch; a second press while it runs is refused', async ()
   assert.equal(second.attempted, 0)
   release()
   assert.equal((await first).continued, 1)
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('a pause cancels the running batch and no queued row starts after it', async () => {
+  const dir = home()
+  const settled = []
+  const ledger = createLedger({
+    dir,
+    now: () => 9000,
+    log: () => {},
+    probe: {
+      statusOf: () => ({ running: false, goal: null }),
+      latestTurnEnd: async () => null,
+      // The probe honours the batch cancellation the way the shipped one does: it stops before the
+      // next boundary instead of leaving a prompt to land after the person was told work stopped.
+      continueSession: async (row, options = {}) => {
+        settled.push(row.sessionId)
+        while (options.isCancelled?.() !== true) await new Promise((resolve) => setTimeout(resolve, 5))
+        return { status: 'interrupted', detail: 'restore stopped', continued: false }
+      },
+      continueGoal: async () => ({ status: 'skipped' }),
+    },
+  })
+  for (let turn = 1; turn <= 5; turn += 1) {
+    ledger.observe(`s${turn}`, { type: 'turn/end', seq: turn, time: 100 + turn, data: { turn, reason: { kind: 'error' } } })
+  }
+  const batch = ledger.continueAll()
+  while (settled.length < 2) await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(ledger.inFlight(), true)
+  assert.equal(ledger.cancel(), true)
+  assert.equal(await ledger.drain(2000), true, 'the pause waits for the batch to unwind')
+  const result = await batch
+  assert.equal(result.status, 'accepted')
+  assert.equal(result.cancelled, true)
+  assert.equal(result.continued, 0)
+  assert.equal(result.cancelledCount, 5)
+  assert.equal(settled.length, 2, 'a queued row never reaches the probe after a pause')
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  assert.equal(settled.length, 2)
+  assert.equal(result.remaining, 5, 'cancelled work stays for the next press')
+  assert.equal(ledger.describe().count, 5)
+  assert.equal(ledger.inFlight(), false)
   rmSync(dir, { recursive: true, force: true })
 })
 

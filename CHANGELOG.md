@@ -1,3 +1,15 @@
+## 0.6.11
+
+- 修掉“同一任务再次失败后 ↻ 就发不出消息”的缓存错位：结束事件在缓存里是字符串，读取方却按对象取 `kind`，第二次失败把整行读成不可读；现在只有一种结束事件形状，错误、`max-tokens` 连续发生也仍然各自成为下一次可按的候选。再次失败不是丢失，只是等下一次人工按压。
+- 修掉“批量继续时按暂停只停住已发出的请求”：暂停取消的是同一个批次（`ledger.cancel()` + `gate.abort()` + `ledger.drain()`），排队中的行不会再被 `mapLimit` 取走；批次结束前按钮不会被第二次继续占据。
+- 准入归属统一为 `engine.ownsAdmission(sessionId)`：只有本实例计划里记录的那次准入才算“已经发过”，别的窗口/旧进程的残留不会被误认成自己的重试，也不会因重试而重复发送。
+- job 交付证明只认“本次恢复真的发出过请求”：`already running`、只挂载、已准入但没有 `requestId` 都返回继续但不置 `delivered`；带负向用例，防止把“没发”记成“已交付”。
+- 冷会话里只能挂载后才看得见的 goal：挂载后重新读取并按当前 revision 重新武装；goal 读不出来时落 `attention`，不再猜一个 revision 去恢复。
+- 过期 goal 检查点（`pendingRestore`）按当前 revision 对账后重写，不再让旧 revision 永远卡住恢复；写检查点失败仍保留意图并报 `partial`。
+- 渐进恢复开启时，`POST /continue` 与恢复批次走同一道门控：批次期间 `gate.enabled()` 为真，正常返回和抛错都必须关闭；补了应用级测试，否则异常继续可以绕过并发上限。
+- 账本新增只读分类：每行 `blocking` / `actionable`，`pendingContinue` 汇总 `blocking` / `actionable`。`attention` 行和“重试也修不好”的错误码（鉴权、权限、额度、模型不存在、上下文超长等）标成 `blocking`，其余标成 `actionable`。它只是给页面看的标签，不改变“一次按压继续全部可见行”的语义，也不会隐藏任何行。
+- 测试：321 个单测；`acceptance/run.mjs` 8/8、`acceptance/round2.mjs` 5/5、真实 Host smoke 18/18、host-live 14/14、host-maintenance 11/11。验收记录见 `docs/acceptance-0.6.11.md`。
+
 ## 0.6.10
 
 - Turns that stop on their own now have a home: a turn whose latest end is `error` or `max-tokens`, with no later start or end, becomes one “继续未完成的任务” row in a new independent ledger (`continue.json`). A person presses ↻ once and the visible rows are continued two at a time with ordinary user messages. Nothing is sent on load, on a timer, or automatically after a failed batch; a row that fails waits for the next press.

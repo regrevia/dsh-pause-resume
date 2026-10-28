@@ -29,6 +29,14 @@ function harness({ agents = [], goals = {}, jobs = {}, unownedJobs = [], kill = 
         goals[agent.id] = { ...view, phase: 'paused', activation: 'disarmed', revision: view.revision + 1 }
         return { ...goals[agent.id] }
       },
+      resume: (agent, ref) => {
+        calls.push(['goals.resume', ref?.id, ref?.revision])
+        if (live.get(agent?.id) !== agent) throw new Error('GOAL_AGENT_NOT_LIVE')
+        const view = goals[agent.id]
+        if (view === undefined || view.id !== ref.id || view.revision !== ref.revision) throw new Error('GOAL_STALE_REVISION')
+        goals[agent.id] = { ...view, activation: 'armed', revision: view.revision + 1 }
+        return { ...goals[agent.id] }
+      },
     },
     jobs: {
       list: (caller) => (caller === undefined ? unownedJobs : jobs[caller] ?? []),
@@ -95,18 +103,31 @@ function harness({ agents = [], goals = {}, jobs = {}, unownedJobs = [], kill = 
 }
 
 /** A readable turn boundary plus a real event channel, like the shipped projection and watcher. */
-function turnRig({ lastTurn = 6, open = false, status = 'idle' } = {}) {
-  const fake = harness({ agents: [{ id: 's1', status, phase: { lastTurn }, session: { id: 's1' } }] })
+function turnRig({ lastTurn = 6, open = false, status = 'idle', goals = {} } = {}) {
+  const fake = harness({ agents: [{ id: 's1', status, phase: { lastTurn }, session: { id: 's1' } }], goals })
   const state = { lastTurn, openTurnStartSeq: open ? 1 : null }
   fake.services.sessionProjections = { stateOf: (session, key) => (key === 'turnBoundary' ? state : undefined) }
   const handlers = new Map()
   const order = []
+  // The shipped host lets every subscriber listen at once: the durable observer and the bounded
+  // turn watch coexist. A single-slot map would hide the cache the repeated-continue path reads.
   const watchTurn = (sessionId, onEvent) => {
     order.push(['watch', sessionId])
-    handlers.set(sessionId, onEvent)
-    return () => handlers.delete(sessionId)
+    const list = handlers.get(sessionId) ?? []
+    const entry = { onEvent }
+    list.push(entry)
+    handlers.set(sessionId, list)
+    return () => {
+      const current = handlers.get(sessionId)
+      if (current === undefined) return
+      const at = current.indexOf(entry)
+      if (at !== -1) current.splice(at, 1)
+      if (current.length === 0) handlers.delete(sessionId)
+    }
   }
-  const emit = (sessionId, event) => handlers.get(sessionId)?.(event)
+  const emit = (sessionId, event) => {
+    for (const entry of [...(handlers.get(sessionId) ?? [])]) entry.onEvent(event)
+  }
   return { fake, state, watchTurn, emit, order }
 }
 
@@ -556,6 +577,40 @@ test('restoreSession() still treats a live running turn as already running, neve
   }
 })
 
+test('prepareGoal() claims a goal sitting at the exact revision its own resume produced', async () => {
+  // The previous process armed the goal (8) and then failed to save its checkpoint, so disk still
+  // names revision 7. Seeing 8 disarmed is proof the resume happened; treating it as somebody
+  // else's goal would strand the work forever.
+  const rig = turnRig({ lastTurn: 6, goals: { s1: { id: 'g1', phase: 'active', activation: 'disarmed', revision: 8 } } })
+  const probe = createProbe(rig.fake.registry, { settleMs: 200, watchTurn: rig.watchTurn })
+  const row = { sessionId: 's1', goalId: 'g1', revision: 7, pendingRestore: { revision: 7, expect: 8 } }
+  const prepared = await probe.prepareGoal(row, { plan: { planId: 'p', goals: [row] } })
+  assert.equal(prepared.status, 'ready', JSON.stringify(prepared))
+  assert.equal(prepared.revision, 8)
+  const restored = await probe.restoreGoal(row, { plan: { planId: 'p', goals: [row] } })
+  assert.equal(restored.status, 'restored', JSON.stringify(restored))
+  assert.equal(restored.revision, 9)
+  assert.equal(rig.fake.calls.some((call) => call[0] === 'goals.resume' && call[2] === 8), true)
+})
+
+test('restoreSession() re-arms a cold goal it can only see after attaching the session', async () => {
+  // A process that never held the session cannot read its goal before the mount, so the ledger routes
+  // the row as an ordinary turn. The mount reveals an active goal the round driver disarmed; sending
+  // a plain message would spend the row and leave the goal disarmed forever.
+  const rig = turnRig({ lastTurn: 6, goals: { s1: { id: 'g1', phase: 'active', activation: 'disarmed', revision: 5 } } })
+  rig.fake.calls.length = 0
+  const probe = createProbe(rig.fake.registry, { settleMs: 200, watchTurn: rig.watchTurn })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 6 },
+    { plan: { planId: 'cold-1', sessions: [{ sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 6 }] } },
+  )
+  assert.equal(outcome.status, 'restored', JSON.stringify(outcome))
+  assert.equal(outcome.continued, true)
+  assert.equal(outcome.goal?.id, 'g1')
+  assert.equal(rig.fake.calls.some((call) => call[0] === 'goals.resume' && call[2] === 5), true, 'the revision read after the mount is the one resumed')
+  assert.equal(rig.fake.calls.some((call) => call[0] === 'prompt'), false, 'the goal is the owed work, not a plain message')
+})
+
 test('an unknown root row whose log proves the turn was cut in flight is continued, not held forever', async () => {
   // The reported failure: after a real restart, play moved the button but no work restarted, because
   // every `unknown` row answered "open the session to decide" even though the persisted log already
@@ -1002,7 +1057,7 @@ test('an upstream error is resumed only by the person press, never by a pause or
     assert.equal(fake.calls.filter((call) => call[0] === 'prompt').length, 0, 'no automatic press sends a message')
     const verdict = await probe.assessSession(session, { plan: { planId: 'continue-1', source: 'continue' }, allowAbnormalEnd: true })
     assert.equal(verdict.action, 'continue')
-    assert.equal(verdict.end, 'error')
+    assert.equal(verdict.end, 'error', JSON.stringify(verdict))
     const outcome = await probe.continueSession({ sessionId, turn: 3 })
     assert.equal(fake.calls.filter((call) => call[0] === 'prompt').length, 1)
     assert.equal(outcome.status, 'restored')
@@ -1010,4 +1065,59 @@ test('an upstream error is resumed only by the person press, never by a pause or
   } finally {
     await rm(home, { recursive: true, force: true })
   }
+})
+
+test('an in-process stop observed after the request returns stays continuable, and completion stays closed', async () => {
+  const rig = turnRig({ lastTurn: 5 })
+  let prompts = 0
+  rig.fake.services.sessionController.prompt = async () => {
+    prompts += 1
+    const agent = rig.fake.live.get('s1')
+    agent.status = 'running'
+    agent.phase.lastTurn = 5 + prompts
+    rig.state.lastTurn = 5 + prompts
+    rig.state.openTurnStartSeq = prompts
+    // The official controller emits the start inside `prompt()`, before it resolves.
+    rig.emit('s1', { type: 'turn/start', data: { turn: 5 + prompts } })
+    return { accepted: true }
+  }
+  const probe = createProbe(rig.fake.registry, { settleMs: 60, watchTurn: rig.watchTurn })
+  // Subscribe while the turn is still open, exactly as the pre-prompt assessment does, so the
+  // asynchronous end below reaches the in-process cache.
+  await probe.assessSession(
+    { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 5 },
+    { plan: { planId: 'continue-1', source: 'continue' }, allowAbnormalEnd: true },
+  )
+  const first = await probe.continueSession({ sessionId: 's1', turn: 5 })
+  assert.equal(first.status, 'restored')
+  assert.equal(prompts, 1)
+
+  // The provider fails after `prompt()` already returned. The event, not a durable reader, carries
+  // the reason; a string cache used to lose its `kind` and turn the row unreadable.
+  rig.emit('s1', turnEnd(6, 'error'))
+  rig.fake.live.get('s1').status = 'idle'
+  rig.state.openTurnStartSeq = null
+  const verdict = await probe.assessSession(
+    { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 6 },
+    { plan: { planId: 'continue-1', source: 'continue' }, allowAbnormalEnd: true },
+  )
+  assert.equal(verdict.end, 'error', JSON.stringify(verdict))
+  assert.equal(verdict.action, 'continue')
+  const second = await probe.continueSession({ sessionId: 's1', turn: 6 })
+  assert.equal(second.status, 'restored')
+  assert.equal(prompts, 2, 'a second upstream error is still continuable')
+
+  // A normally completed turn must close instead of offering another prompt.
+  rig.emit('s1', turnEnd(7, 'completed'))
+  rig.fake.live.get('s1').status = 'idle'
+  rig.state.openTurnStartSeq = null
+  const closed = await probe.assessSession(
+    { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 7 },
+    { plan: { planId: 'continue-2', source: 'continue' }, allowAbnormalEnd: true },
+  )
+  assert.equal(closed.end, 'completed')
+  assert.equal(closed.action, 'skip')
+  const third = await probe.continueSession({ sessionId: 's1', turn: 7 })
+  assert.equal(third.status, 'skipped')
+  assert.equal(prompts, 2, 'a completed turn never gets an extra prompt')
 })
