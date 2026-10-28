@@ -237,7 +237,8 @@ apart), `docs/acceptance-0.6.9.md` (the ten defects from the previous review), `
 button without restarting anything), `docs/acceptance-0.6.6.md` (an `unknown` row a person
 continued by hand and finished, child rows honouring the same intents as roots, the race window, and
 what is still unverified), `docs/acceptance-0.6.5.md` (0.6.5), `docs/acceptance-0.6.0.md` (0.6.0–0.6.1)
-and `docs/evidence/`. The job-lifecycle listening design review, including why a job is
+and `docs/evidence/`. The eight-item mapping from the second review to code and proof is
+`docs/objective-round2-closure.md`. The job-lifecycle listening design review, including why a job is
 never restarted, is `docs/design/job-lifecycle.md`.
 
 `lib/engine.js` performs no I/O, `lib/snapshot.js` persists, `lib/probe.js` holds every Harness service
