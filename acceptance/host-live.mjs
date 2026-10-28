@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startMockLlm } from './mock-llm.mjs'
+import { redactedJson } from './redact.mjs'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const REPO = dirname(ROOT)
@@ -398,7 +399,7 @@ try {
   evidence.finishedAt = new Date().toISOString()
   if (failure !== null || allOk !== true) evidence.verdict = 'fail'
   await mkdir(dirname(evidencePath), { recursive: true })
-  await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
+  await writeFile(evidencePath, redactedJson(evidence))
   process.stdout.write(`\nverdict: ${evidence.verdict}\nevidence: ${evidencePath}\ndshHome: ${home}${KEEP ? ' (kept)' : ''}\n`)
   if (!KEEP) {
     const { rm } = await import('node:fs/promises')

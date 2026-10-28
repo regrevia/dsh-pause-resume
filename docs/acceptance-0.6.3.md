@@ -8,7 +8,7 @@
 ## 1. 复现方式
 
 ```bash
-cd /Users/apple/Desktop/DSH/dsh-pause-resume
+cd <repo>
 node acceptance/run.mjs                 # 7 个端到端场景：真实 temp 目录 + 真实 store/heartbeat/engine/probe
 node acceptance/round2.mjs              # 5 组契约场景：真实 engine/probe + 可控服务层
 node acceptance/host-smoke.mjs          # 隔离 DSH_HOME 的真实 Host 冒烟（本机 DSH 应用，不动 54279）

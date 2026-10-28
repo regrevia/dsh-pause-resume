@@ -22,6 +22,7 @@ import { request as httpRequest } from 'node:http'
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { redactedJson } from './redact.mjs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -633,7 +634,7 @@ try {
   if (host !== undefined) { try { await stopHost(host) } catch { /* best effort */ } }
   evidence.verdict = failure === null && allOk === true ? 'pass' : 'fail'
   await mkdir(dirname(evidencePath), { recursive: true })
-  await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
+  await writeFile(evidencePath, redactedJson(evidence))
   process.stdout.write(`evidence: ${evidencePath}\n`)
   process.stdout.write(`verdict: ${evidence.verdict} (exit ${evidence.verdict === 'pass' ? 0 : 1})\n`)
   if (!KEEP) {

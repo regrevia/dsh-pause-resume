@@ -11,6 +11,7 @@
 //   the Host half and docs/acceptance-0.6.2.md for the explicit unverified list.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { redactedJson } from './redact.mjs'
 import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import path from 'node:path'
@@ -517,7 +518,7 @@ summary.failed = results.filter((row) => row.status === 'fail').length
 // output of the command a reader can re-run.
 const evidence = new URL('../docs/evidence/acceptance-run.json', import.meta.url)
 fs.mkdirSync(path.dirname(fileURLToPath(evidence)), { recursive: true })
-fs.writeFileSync(evidence, `${JSON.stringify(summary, null, 2)}\n`)
+fs.writeFileSync(evidence, redactedJson(summary))
 console.log(JSON.stringify(summary, null, 2))
 // Strict gate: seven scenarios exist and every one of them must pass. A run that silently loses a
 // scenario (`|| true`, a swallowed assertion) must not exit 0.

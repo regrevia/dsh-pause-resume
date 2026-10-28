@@ -28,6 +28,7 @@ import { join, dirname } from 'node:path'
 import { createServer } from 'node:net'
 import { request as httpRequest } from 'node:http'
 import { fileURLToPath } from 'node:url'
+import { redactedJson } from './redact.mjs'
 
 const ROOT = dirname(fileURLToPath(new URL('.', import.meta.url)))
 const REPO = process.env.DSH_REPO ?? ROOT
@@ -277,6 +278,6 @@ try {
   // record, or a later reader would see a failed verdict for a Host that actually passed.
   const outPath = join(REPO, 'docs', 'evidence', SELF_TEST_FAIL ? 'host-smoke-self-test.json' : 'host-smoke.json')
   await mkdir(dirname(outPath), { recursive: true })
-  await writeFile(outPath, `${JSON.stringify(evidence, null, 2)}\n`)
+  await writeFile(outPath, redactedJson(evidence))
   process.stdout.write(`\nverdict: ${evidence.verdict}\nexitCode: ${process.exitCode ?? 0}\nevidence: ${outPath}\n`)
 }

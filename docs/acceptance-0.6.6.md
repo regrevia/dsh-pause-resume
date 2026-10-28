@@ -10,6 +10,7 @@
 - 门禁与 0.6.5 相同：真实进程、真实文件、真实 HTTP（`acceptance/host-*.mjs`，隔离 `DSH_HOME`，不碰正在使用的 GUI `127.0.0.1:53344`）；唯一替身是本地 mock 模型，证据里标明。
 - 本轮行为先由 `test/round2-probe.test.mjs` 的可控服务替身覆盖（含真实 zstd 会话日志），再跑全部真实门禁确认无回归。
 - 失败即非零退出。
+- 提交进仓库的证据 JSON 经 `acceptance/redact.mjs` 去掉本机绝对路径（仓库路径→`<repo>`，家目录→`<home>`，临时目录→`<tmp>`），其余内容逐字保留；生成的 spike 源码例外，它只写进临时 `DSH_HOME`。
 
 ## 2. 本轮真实执行结果
 

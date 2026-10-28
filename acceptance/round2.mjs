@@ -5,7 +5,7 @@
 //
 // What this file is allowed to prove: engine/probe behaviour against controllable services.
 // What it is NOT allowed to prove: a real Host process with a live model stream. That boundary is
-// stated in docs/acceptance-0.6.2.md; /Users/apple/.../host-smoke.mjs owns the Host half.
+// stated in docs/acceptance-0.6.2.md; acceptance/host-smoke.mjs owns the Host half.
 //
 // Contract under test (docs/design/round2-contract.md §3):
 //   P1-1 a turn interrupted by a crash is continued exactly once, from durable turn-end evidence
@@ -19,6 +19,7 @@
 // Exit: 0 only when every group passes; 1 when anything fails or the interface is missing.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { redactedJson } from './redact.mjs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -388,7 +389,7 @@ summary.failed = results.filter((row) => row.status === 'fail').length
 
 const evidencePath = path.join(ROOT, 'docs', 'evidence', 'round2.json')
 fs.mkdirSync(path.dirname(evidencePath), { recursive: true })
-fs.writeFileSync(evidencePath, `${JSON.stringify(summary, null, 2)}\n`)
+fs.writeFileSync(evidencePath, redactedJson(summary))
 process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
 // Strict gate: five groups exist and all of them must pass. A missing interface is a failure, not a
 // skip, because "the code cannot express the contract yet" is exactly what this run must expose.

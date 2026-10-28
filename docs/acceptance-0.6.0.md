@@ -8,7 +8,7 @@
 ## 1. 复现方式
 
 ```bash
-cd /Users/apple/Desktop/DSH/dsh-pause-resume
+cd <repo>
 node acceptance/run.mjs                 # 7 个端到端场景，真实 temp 目录 + 真实 store/heartbeat/engine/probe
 node --test test/*.test.mjs             # 213 个单元/集成测试
 npm run audit                           # 静态检查
