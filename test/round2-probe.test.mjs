@@ -704,3 +704,310 @@ test('a continuation blocked after admission is attention, not another send', as
   assert.match(String(outcome.detail), /blocked/)
   assert.equal(rig.fake.calls.filter((call) => call[0] === 'prompt').length, 1)
 })
+
+function turnStart(turn) {
+  return { type: 'turn/start', data: { turn } }
+}
+
+test('heartbeat one round behind: an unclosed later turn is owed, never skipped', async () => {
+  // The regression from review: heartbeat sampled turn 8 as completed, then the process opened turn 9
+  // and died before another beat. Reading only the sampled end classified the row `skip`, retired the
+  // plan and left the unfinished turn 9 with no continuation. The durable log's trailing start is the
+  // proof the sampled end cannot overrule.
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const sessionId = UUID()
+    await writeSessionLog(home, sessionId, [[turnEnd(8, 'completed')], [turnStart(9), { type: 'turn/progress', data: { turn: 9 } }]])
+    const agent = { id: sessionId, status: 'idle', phase: { lastTurn: 8 }, session: { id: sessionId } }
+    const services = { agents: { get: (id) => (id === sessionId ? agent : undefined), list: () => [agent] } }
+    const probe = createProbe({ get: (key) => services[key] }, { dshHome: home, settleMs: 60 })
+    const plan = { planId: 'heartbeat-lag', source: 'crash', sessions: [
+      { sessionId, intent: 'skip', running: false, crash: true, lastTurn: 8 },
+    ] }
+    await probe.classifyCrashPlan(plan)
+    assert.equal(plan.sessions[0].intent, 'continue', JSON.stringify(plan.sessions[0]))
+    assert.equal(plan.sessions[0].running, true)
+    assert.equal(plan.sessions[0].lastTurn, 9, 'the owed turn is the unclosed one')
+    const verdict = await probe.assessSession(plan.sessions[0], { plan })
+    assert.equal(verdict.action, 'continue')
+    assert.equal(verdict.end, 'open')
+    assert.equal(verdict.turn, 9)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('a later start becomes terminal only when its own end is in the same durable tail', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const sessionId = UUID()
+    await writeSessionLog(home, sessionId, [[turnEnd(8, 'completed')], [turnStart(9), turnEnd(9, 'completed')]])
+    const agent = { id: sessionId, status: 'idle', phase: { lastTurn: 9 }, session: { id: sessionId } }
+    const services = { agents: { get: () => agent, list: () => [agent] } }
+    const probe = createProbe({ get: (key) => services[key] }, { dshHome: home, settleMs: 60 })
+    const verdict = await probe.assessSession({ sessionId, intent: 'continue', lastTurn: 8 }, { plan: { planId: 'p', source: 'crash' } })
+    assert.equal(verdict.action, 'skip')
+    assert.equal(verdict.turn, 9)
+    assert.equal(verdict.end, 'completed')
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('a cold root whose log has a start and no end is continued instead of guessed unknown', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const sessionId = UUID()
+    await writeSessionLog(home, sessionId, [[turnStart(4)]])
+    const agent = { id: sessionId, status: 'idle', phase: { lastTurn: 4 }, session: { id: sessionId } }
+    const services = { agents: { get: () => agent, list: () => [agent] } }
+    const probe = createProbe({ get: (key) => services[key] }, { dshHome: home, settleMs: 60 })
+    const verdict = await probe.assessSession({ sessionId, intent: 'continue', lastTurn: 3 }, { plan: { planId: 'p', source: 'crash' } })
+    assert.equal(verdict.action, 'continue')
+    assert.equal(verdict.end, 'open')
+    assert.equal(verdict.turn, 4)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('a cold child whose raw log has an unclosed start is continued, never reported running', async () => {
+  // The crash residue can leave the child projection open while no Agent exists. Treating that open
+  // flag as a live turn skipped the parent route forever; a cold child may only be woken by
+  // `subagents.prompt`, so the open residue must fall through to it.
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const childId = UUID()
+    await writeSessionLog(home, childId, [[turnEnd(5, 'interrupted')], [turnStart(6)]])
+    const fake = harness({ agents: [{ id: 'p1', status: 'idle', phase: { lastTurn: 9 }, session: { id: 'p1' } }] })
+    const probe = createProbe(fake.registry, { dshHome: home, settleMs: 60 })
+    const outcome = await probe.restoreSession(
+      { sessionId: childId, parent: 'p1', origin: 'subagent', intent: 'continue', epoch: 1, lastTurn: 5 },
+      { plan: { planId: 'p1', source: 'crash' } },
+    )
+    assert.equal(fake.calls.filter((call) => call[0] === 'subagents.prompt').length, 1)
+    assert.equal(outcome.status, 'unknown')
+    assert.match(String(outcome.detail), /admitted/)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('a crash child marked skip is re-read before the parent route is closed', async () => {
+  // A heartbeat sampled turn 5 completed, then turn 6 opened and died. The stale row says skip; the
+  // durable tail says otherwise, and that tail has to win before the child is left unrestored.
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const childId = UUID()
+    await writeSessionLog(home, childId, [[turnEnd(5, 'completed')], [turnStart(6)]])
+    const fake = harness({
+      agents: [
+        { id: 'p1', status: 'idle', phase: { lastTurn: 9 }, session: { id: 'p1' } },
+        { id: childId, status: 'idle', phase: { lastTurn: 5 }, session: { id: childId, header: { parentSession: 'p1' } } },
+      ],
+    })
+    const probe = createProbe(fake.registry, { dshHome: home, settleMs: 60 })
+    const outcome = await probe.restoreSession(
+      { sessionId: childId, parent: 'p1', origin: 'subagent', intent: 'skip', epoch: 1, lastTurn: 5, crash: true },
+      { plan: { planId: 'p1', source: 'crash' } },
+    )
+    assert.equal(fake.calls.filter((call) => call[0] === 'subagents.prompt').length, 1)
+    assert.equal(outcome.status, 'restored')
+    assert.equal(outcome.turn, 6)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('a mount-only child that is cold stays pending instead of claiming a mount', async () => {
+  const fake = harness({ agents: [{ id: 'p1', status: 'idle', phase: { lastTurn: 9 }, session: { id: 'p1' } }] })
+  const probe = createProbe(fake.registry, { settleMs: 60 })
+  const outcome = await probe.restoreSession(
+    { sessionId: 'c1', parent: 'p1', origin: 'subagent', intent: 'mount', epoch: 1 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'unknown')
+  assert.equal(outcome.continued, false)
+  assert.equal(fake.calls.some((call) => call[0] === 'subagents.prompt'), false)
+})
+
+test('the restore batch reserves before the prompt and abandons it when the prompt throws', async () => {
+  const fake = harness({ agents: [{ id: 's1', status: 'idle', phase: { lastTurn: 5 }, session: { id: 's1' } }] })
+  const order = []
+  fake.services.sessionController.prompt = async () => {
+    order.push('prompt')
+    throw new Error('provider refused')
+  }
+  const probe = createProbe(fake.registry, {
+    settleMs: 60,
+    onReserve: (sessionId) => order.push(`reserve:${sessionId}`),
+    onAbandon: (sessionId) => order.push(`abandon:${sessionId}`),
+  })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 5 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.deepEqual(order, ['reserve:s1', 'prompt', 'abandon:s1'])
+  assert.equal(outcome.status, 'failed')
+})
+
+test('a crash root marked skip re-reads the durable log before closing the row', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const sessionId = UUID()
+    await writeSessionLog(home, sessionId, [[turnEnd(5, 'completed')], [turnStart(6)]])
+    const fake = harness({ agents: [{ id: sessionId, status: 'idle', phase: { lastTurn: 5 }, session: { id: sessionId } }] })
+    const probe = createProbe(fake.registry, { dshHome: home, settleMs: 60 })
+    const outcome = await probe.restoreSession(
+      { sessionId, intent: 'skip', epoch: 1, lastTurn: 5, crash: true },
+      { plan: { planId: 'p1', source: 'crash' } },
+    )
+    assert.equal(fake.calls.filter((call) => call[0] === 'prompt').length, 1)
+    assert.equal(outcome.status, 'restored')
+    assert.equal(outcome.turn, 6)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('a settled job is handoff evidence, not live work for the next capture', async () => {
+  const fake = harness({ unownedJobs: [{ id: 'j3', status: 'running' }] })
+  const probe = createProbe(fake.registry, { graceMs: 200 })
+  const stopped = await probe.stop(probe.live())
+  assert.deepEqual(stopped.killedJobs, [{ id: 'j3', owner: null }])
+  assert.equal(probe.live().jobs.some((job) => job.id === 'j3'), false)
+})
+
+test('the pause parks an awaited job reader so a late settlement cannot wake the owner', async () => {
+  const fake = harness({ unownedJobs: [{ id: 'j4', status: 'running' }] })
+  const order = []
+  fake.services.jobs.wait = (id, timeoutMs, caller) => {
+    order.push(['jobs.wait', id, timeoutMs > 0, caller ?? null])
+    return new Promise(() => {})
+  }
+  fake.services.jobs.kill = (id) => {
+    order.push(['jobs.kill', id])
+  }
+  const probe = createProbe(fake.registry, { graceMs: 200 })
+  await probe.stop(probe.live())
+  assert.deepEqual(order[0], ['jobs.wait', 'j4', true, null])
+  assert.deepEqual(order[1], ['jobs.kill', 'j4'])
+})
+
+test('a pending job handoff is never skipped by the turn that completed before the press', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const sessionId = UUID()
+    await writeSessionLog(home, sessionId, [[turnEnd(5, 'completed')]])
+    const probe = createProbe(harness({}).registry, { dshHome: home, settleMs: 60 })
+    const row = { sessionId, intent: 'continue', epoch: 1, lastTurn: null, handoff: 'job', handoffPhase: 'pending' }
+    const verdict = await probe.assessSession(row, { plan: { planId: 'p1' } })
+    assert.equal(verdict.action, 'continue')
+    assert.match(verdict.detail, /never delivered/)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('a delivered handoff is not closed by a completed end older than its delivery turn', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const sessionId = UUID()
+    await writeSessionLog(home, sessionId, [[turnEnd(5, 'completed')]])
+    const fake = harness({ agents: [{ id: sessionId, status: 'idle', phase: { lastTurn: 6 }, session: { id: sessionId } }] })
+    const probe = createProbe(fake.registry, { dshHome: home, settleMs: 60 })
+    const row = { sessionId, intent: 'continue', epoch: 1, lastTurn: 6, handoff: 'job', handoffPhase: 'delivered', deliveredTurn: 7 }
+    const verdict = await probe.assessSession(row, { plan: { planId: 'p1' } })
+    assert.notEqual(verdict.action, 'skip')
+    assert.equal(verdict.action, 'unknown')
+    const outcome = await probe.restoreSession(row, { plan: { planId: 'p1' } })
+    assert.equal(outcome.status, 'unknown')
+    assert.equal(outcome.continued, false)
+    assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('a delivered handoff closes when its own delivery turn completed', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const sessionId = UUID()
+    await writeSessionLog(home, sessionId, [[turnEnd(8, 'completed')]])
+    const probe = createProbe(harness({}).registry, { dshHome: home, settleMs: 60 })
+    const row = { sessionId, intent: 'continue', epoch: 1, lastTurn: 7, handoff: 'job', handoffPhase: 'delivered', deliveredTurn: 7 }
+    const verdict = await probe.assessSession(row, { plan: { planId: 'p1' } })
+    assert.equal(verdict.action, 'skip')
+    assert.equal(verdict.end, 'completed')
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('a pending handoff prompt is admitted even though the old owner turn completed', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const sessionId = UUID()
+    await writeSessionLog(home, sessionId, [[turnEnd(5, 'completed')]])
+    const fake = harness({ agents: [{ id: sessionId, status: 'idle', phase: { lastTurn: 5 }, session: { id: sessionId } }] })
+    const probe = createProbe(fake.registry, { dshHome: home, settleMs: 80 })
+    const row = { sessionId, intent: 'continue', epoch: 1, lastTurn: null, handoff: 'job', handoffPhase: 'pending' }
+    const outcome = await probe.restoreSession(row, { plan: { planId: 'p1' } })
+    assert.equal(outcome.continued, true)
+    assert.equal(fake.calls.some((call) => call[0] === 'prompt' || call[0] === 'cancel'), true)
+    assert.equal(fake.calls.some((call) => call[0] === 'prompt'), true)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('stop() issues every maintenance cancel before waiting under one total deadline', async () => {
+  const agents = [
+    { id: 'm1', status: 'idle', phase: { kind: 'maintenance', lastTurn: 2 } },
+    { id: 'm2', status: 'idle', phase: { kind: 'maintenance', lastTurn: 3 } },
+  ]
+  const order = []
+  const fake = harness({
+    agents,
+    cancel: (id) => {
+      order.push(`cancel:${id}`)
+      setTimeout(() => {
+        order.push(`settle:${id}`)
+        const agent = agents.find((row) => row.id === id)
+        agent.phase = { lastTurn: agent.phase.lastTurn + 1 }
+      }, 60)
+    },
+  })
+  const probe = createProbe(fake.registry, { graceMs: 200 })
+  const startedAt = Date.now()
+  const stopped = await probe.stop(probe.live())
+  assert.deepEqual(stopped.maintenanceCanceled.sort(), ['m1', 'm2'])
+  assert.deepEqual(stopped.maintenanceErrors, [])
+  assert.ok(Date.now() - startedAt < 2000)
+  assert.deepEqual(order.slice(0, 2).sort(), ['cancel:m1', 'cancel:m2'])
+})
+
+test('an upstream error is resumed only by the person press, never by a pause or crash restore', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const sessionId = UUID()
+    await writeSessionLog(home, sessionId, [[turnEnd(3, 'error')]])
+    const fake = harness({ agents: [{ id: sessionId, status: 'idle', phase: { lastTurn: 3 }, session: { id: sessionId } }] })
+    const probe = createProbe(fake.registry, { dshHome: home, settleMs: 60 })
+    const session = { sessionId, intent: 'continue', epoch: 1, lastTurn: 3 }
+    const defaultVerdict = await probe.assessSession(session, { plan: { planId: 'crash-1', source: 'crash' } })
+    assert.equal(defaultVerdict.action, 'unknown', 'an error is not owed work for the automatic crash path')
+    const automatic = await probe.restoreSession(session, { plan: { planId: 'crash-1', source: 'crash' } })
+    assert.equal(automatic.status, 'unknown')
+    assert.equal(fake.calls.filter((call) => call[0] === 'prompt').length, 0, 'no automatic press sends a message')
+    const verdict = await probe.assessSession(session, { plan: { planId: 'continue-1', source: 'continue' }, allowAbnormalEnd: true })
+    assert.equal(verdict.action, 'continue')
+    assert.equal(verdict.end, 'error')
+    const outcome = await probe.continueSession({ sessionId, turn: 3 })
+    assert.equal(fake.calls.filter((call) => call[0] === 'prompt').length, 1)
+    assert.equal(outcome.status, 'restored')
+    assert.equal(outcome.continued, true)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})

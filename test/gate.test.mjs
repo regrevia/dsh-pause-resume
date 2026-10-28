@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createGate } from '../lib/gate.js'
+import { createGate, streamOutcome } from '../lib/gate.js'
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5))
 
@@ -184,4 +184,109 @@ test('a tracked turn keeps a drained gate open so its second model call is still
   gate.turnEnd('s1')
   assert.equal(gate.enabled(), false, 'the last tracked turn closes the drained gate')
   assert.equal(gate.stats().draining, false)
+})
+
+test('a start the prompt emits before returning is counted from the reservation, and the slot budget holds', async () => {
+  const gate = createGate({ capacity: 1 })
+  gate.guard()
+  // The shipped controller emits `turn/start` synchronously inside `prompt()`, before the restore
+  // learns the request was admitted. The reservation made just before the prompt is what counts it.
+  gate.reserve('s1')
+  gate.turnOpen('s1')
+  gate.admitted('s1')
+  assert.equal(gate.stats().reserved, 0, 'the tracked event consumed the pending start')
+  assert.equal(gate.stats().openTurns, 1, 'the pre-track turn/start was counted, not dropped')
+  assert.equal(gate.scopes('s1'), true)
+
+  const first = await gate.acquire({ sessionId: 's1' })
+  gate.reserve('s2')
+  gate.turnOpen('s2')
+  gate.admitted('s2')
+  let second = null
+  const waiting = gate.acquire({ sessionId: 's2' }).then((ticket) => { second = ticket })
+  await tick()
+  assert.equal(second, null, 'two restored streams must not run together at capacity 1')
+  assert.equal(gate.stats().running, 1)
+  assert.equal(gate.stats().queued, 1)
+  gate.release(first, 'ok')
+  await waiting
+  gate.release(second, 'ok')
+  gate.turnEnd('s1')
+  gate.turnEnd('s2')
+})
+
+test('a turn/start after the drain closed reopens the batch instead of bypassing the limit', async () => {
+  const gate = createGate({ capacity: 1, lateWindowMs: 60000 })
+  gate.guard()
+  gate.reserve('s1')
+  gate.admitted('s1')
+  // The queue and the slot are both empty, so the drain closes before `turn/start` arrives.
+  gate.unguard()
+  assert.equal(gate.enabled(), false)
+  gate.turnOpen('s1')
+  assert.equal(gate.enabled(), true, 'the late turn/start must extend the drain, not be dropped')
+  assert.equal(gate.stats().openTurns, 1)
+  const ticket = await gate.acquire({ sessionId: 's1' })
+  assert.deepEqual(ticket, { free: false }, 'the late turn is limited, not bypassing the gate')
+  gate.release(ticket, 'ok')
+  gate.turnEnd('s1')
+  assert.equal(gate.enabled(), false)
+})
+
+test('finishDrain is not reached while a reservation or a running stream is outstanding', async () => {
+  const gate = createGate({ capacity: 1 })
+  gate.guard()
+  gate.reserve('s1')
+  gate.unguard()
+  assert.equal(gate.stats().draining, true, 'an admitted prompt is still pending')
+  assert.equal(gate.stats().reserved, 1)
+  // A prompt that really failed gives the reservation up, and only then may the drain close.
+  gate.abandon('s1')
+  assert.equal(gate.stats().draining, false)
+  assert.equal(gate.enabled(), false)
+
+  const stream = createGate({ capacity: 1 })
+  stream.guard()
+  const ticket = await stream.acquire({ sessionId: 's1' })
+  stream.unguard()
+  assert.equal(stream.stats().draining, true, 'a stream in flight is not a finished drain')
+  assert.equal(stream.stats().running, 1)
+  stream.release(ticket, 'ok')
+  assert.equal(stream.stats().draining, false)
+})
+
+test('an ordinary session outside the restore batch is never scoped by the gate', async () => {
+  const gate = createGate({ capacity: 1 })
+  gate.guard()
+  gate.reserve('restored')
+  assert.equal(gate.scopes('restored'), true)
+  assert.equal(gate.scopes('ordinary'), false, 'a person typing during a restore must pass straight through')
+  gate.admitted('restored')
+  gate.turnOpen('restored')
+  assert.equal(gate.scopes('restored'), true)
+  assert.equal(gate.scopes('ordinary'), false)
+  gate.turnEnd('restored')
+  gate.unguard()
+  assert.equal(gate.enabled(), false)
+  assert.equal(gate.scopes('restored'), false, 'a closed batch scopes nothing')
+})
+
+test('a full-consumption aborted caused by our own pause earns no strike and no cooldown', async () => {
+  // Only an upstream abort/error is a strike; our pause signal aborting is a cancellation.
+  assert.equal(streamOutcome({ ended: true, kind: 'aborted', aborted: true }), 'aborted')
+  assert.equal(streamOutcome({ ended: true, kind: 'aborted' }), 'error')
+  assert.equal(streamOutcome({ ended: false }), 'cancelled')
+  assert.equal(streamOutcome({ ended: true, kind: 'completed' }), 'ok')
+
+  const gate = createGate({ capacity: 1, maxCapacity: 2 })
+  gate.guard()
+  for (let i = 0; i < 4; i += 1) {
+    const ticket = await gate.acquire({ sessionId: `s${i}` })
+    gate.release(ticket, streamOutcome({ ended: true, kind: 'aborted', aborted: true }))
+  }
+  assert.equal(gate.stats().capacity, 1, 'an aborted stream neither ramps nor strikes')
+  assert.equal(gate.stats().cooldownUntil, 0)
+  const ticket = await gate.acquire({ sessionId: 'after' })
+  assert.equal(gate.stats().running, 1, 'the pool was never blocked by those cancels')
+  gate.release(ticket, 'ok')
 })

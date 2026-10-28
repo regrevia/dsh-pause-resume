@@ -13,23 +13,22 @@ import { createStore } from '../lib/snapshot.js'
  * Host's work and cannot be faked away.
  */
 
-function fakeStore({ plan = null, journal = [], failConsume = false } = {}) {
-  const state = { plan, writes: [], consumed: null, result: null, journal: new Map(), failConsume }
+function fakeStore({ plan = null, journal = [], failConsume = false, failWrite = null } = {}) {
+  const state = { plan, writes: [], consumed: null, result: null, journal: new Map(), failConsume, writeCount: 0 }
   for (const key of journal) state.journal.set(key, { status: 'restored', boot: 'boot-0' })
+  const write = (next) => {
+    state.writeCount += 1
+    if (typeof failWrite === 'function' && failWrite(state.writeCount, structuredClone(next)) === true) return null
+    state.writes.push(structuredClone(next))
+    state.plan = { ...next }
+    return state.plan
+  }
   return {
     state,
     read: () => state.plan,
-    write: (next) => {
-      state.writes.push(structuredClone(next))
-      state.plan = { ...next }
-      return state.plan
-    },
+    write,
     readPending: () => null,
-    writePending: (next) => {
-      state.writes.push(structuredClone(next))
-      state.plan = { ...next }
-      return state.plan
-    },
+    writePending: write,
     clearPending: () => true,
     writeResult: (record) => {
       state.result = record
@@ -413,7 +412,8 @@ test('the job handoff row reaches the store before its continuation is delivered
   const probe = probeFor({
     restoreSession: async (session) => {
       // A second process must be able to read the obligation while the first one is delivering it.
-      seenAtDelivery = store.read()
+      // Cloned at call time: the engine mutates the plan rows in place during the press.
+      seenAtDelivery = structuredClone(store.read())
       return { status: 'restored', turn: 4, detail: 'continued', continued: true }
     },
   })
@@ -424,31 +424,228 @@ test('the job handoff row reaches the store before its continuation is delivered
   assert.notEqual(seenAtDelivery, null)
   const row = seenAtDelivery.sessions.find((item) => item.sessionId === 'owner')
   assert.equal(row?.handoff, 'job')
+  assert.equal(row?.handoffPhase, 'pending', 'the probe must see an undelivered obligation')
   assert.equal(row?.job?.id, 'j1')
   // The owner was told in this cycle, but `restored` is delivery, not acknowledgement: only the next
   // press, which finds the turn completed and answers `skipped`, spends the obligation.
   assert.equal(store.state.consumed, null)
   const kept = store.read()
-  assert.equal(kept.sessions.find((item) => item.sessionId === 'owner')?.handoff, 'job')
+  const keptRow = kept.sessions.find((item) => item.sessionId === 'owner')
+  assert.equal(keptRow?.handoff, 'job')
+  assert.equal(keptRow?.handoffPhase, 'delivered', 'delivery is recorded so the next boot can check it')
+  assert.equal(keptRow?.deliveredTurn, 4)
   assert.equal(kept.status, 'partial')
 })
 
-test('a handoff the owner already read is spent by the next press, not delivered again', async () => {
+// §2.6 — delivery is not acknowledgement. Only a completed handoff turn at the delivered turn spends
+// the obligation; an older completed owner turn is never proof and never suppresses the prompt.
+test('a delivered handoff whose own turn reads completed is spent without a second prompt', async () => {
   const plan = pausedPlan({
     status: 'partial',
-    sessions: [{ sessionId: 'owner', intent: 'continue', epoch: 1, running: false, lastTurn: null, handoff: 'job', job: { id: 'j1' } }],
+    sessions: [{ sessionId: 'owner', intent: 'continue', epoch: 1, running: false, lastTurn: null, handoff: 'job', handoffPhase: 'delivered', deliveredTurn: 4, job: { id: 'j1' } }],
     jobs: [{ id: 'j1', owner: 'owner', status: 'running', stop: 'stopped' }],
   })
   const store = fakeStore({ plan })
-  const probe = probeFor({ restoreSession: async () => ({ status: 'skipped', detail: 'turn completed before this restart', continued: false }) })
+  const probe = probeFor({ restoreSession: async () => ({ status: 'skipped', turn: 4, detail: 'handoff turn completed at 4', continued: false }) })
   const { engine } = engineFor({ store, probe })
   const result = await engine.resume()
-  // `skipped` is proof the handoff turn already completed, so this is the press that ends the
-  // obligation; the owner is not told the same thing twice.
+
   assert.equal(result.status, 'resumed')
   assert.equal(store.read(), null)
   assert.notEqual(store.state.consumed, null)
+  // The row is re-checked, never re-prompted: one probe call that only reads the settled turn.
   assert.equal(probe.calls.filter((call) => call[0] === 'session').length, 1)
+})
+
+test('a pending handoff with an old completed owner turn is still delivered once and never spent', async () => {
+  const plan = pausedPlan({
+    sessions: [{ sessionId: 'owner', intent: 'continue', epoch: 1, running: false, lastTurn: null, handoff: 'job', handoffPhase: 'pending', job: { id: 'j1' } }],
+    jobs: [{ id: 'j1', owner: 'owner', status: 'running', stop: 'stopped' }],
+  })
+  const store = fakeStore({ plan })
+  let seen = null
+  const probe = probeFor({
+    restoreSession: async (session) => {
+      // Copied at call time: the engine mutates the plan row while the press is in flight.
+      seen = { ...session }
+      // The owner's old turn 3 completed before the pause. A compliant probe still delivers the
+      // handoff once instead of calling the pre-pause turn proof.
+      return { status: 'restored', turn: 3, detail: 'continued', continued: true }
+    },
+  })
+  const { engine } = engineFor({ store, probe })
+  const result = await engine.resume()
+
+  assert.equal(seen?.handoffPhase, 'pending')
+  assert.equal(probe.calls.filter((call) => call[0] === 'session').length, 1, 'the owner is prompted exactly once')
+  assert.equal(result.status, 'partial')
+  assert.equal(store.state.consumed, null)
+  const kept = store.read()
+  const row = kept.sessions.find((item) => item.sessionId === 'owner')
+  assert.equal(row?.handoffPhase, 'delivered')
+  assert.equal(row?.deliveredTurn, 3)
+  assert.equal(kept.status, 'partial')
+})
+
+test('a pending handoff answered skipped is kept owed instead of being spent', async () => {
+  const plan = pausedPlan({
+    sessions: [{ sessionId: 'owner', intent: 'continue', epoch: 1, running: false, lastTurn: null, handoff: 'job', handoffPhase: 'pending', job: { id: 'j1' } }],
+    jobs: [{ id: 'j1', owner: 'owner', status: 'running', stop: 'stopped' }],
+  })
+  const store = fakeStore({ plan })
+  const probe = probeFor({ restoreSession: async () => ({ status: 'skipped', turn: 3, detail: 'turn completed before this restart', continued: false }) })
+  const { engine } = engineFor({ store, probe })
+  const result = await engine.resume()
+
+  // Skipped at an old turn is not delivery. Spending the row here is how a handoff vanished without
+  // the owner ever being told, so the plan stays open and the row stays pending.
+  assert.equal(result.status, 'partial')
+  assert.equal(store.state.consumed, null)
+  assert.equal(store.state.result, null)
+  assert.equal(store.read().sessions.find((item) => item.sessionId === 'owner')?.handoffPhase, 'pending')
+  assert.deepEqual(result.summary.interrupted, [])
+  assert.deepEqual(result.summary.failed, [])
+})
+
+test('a delivered handoff whose turn is still running stays partial without a duplicate prompt', async () => {
+  const plan = pausedPlan({
+    status: 'partial',
+    sessions: [{ sessionId: 'owner', intent: 'continue', epoch: 1, running: false, lastTurn: null, handoff: 'job', handoffPhase: 'delivered', deliveredAt: '2023-11-14T22:20:00.000Z', deliveredTurn: 4, job: { id: 'j1' } }],
+    jobs: [{ id: 'j1', owner: 'owner', status: 'running', stop: 'stopped' }],
+  })
+  const store = fakeStore({ plan })
+  const probe = probeFor({ restoreSession: async () => ({ status: 'restored', turn: 4, detail: 'still running', continued: false }) })
+  const { engine } = engineFor({ store, probe })
+  const result = await engine.resume()
+
+  assert.equal(result.status, 'partial')
+  assert.equal(store.state.consumed, null)
+  assert.equal(probe.calls.filter((call) => call[0] === 'session').length, 1)
+  const row = store.read().sessions.find((item) => item.sessionId === 'owner')
+  assert.equal(row?.handoffPhase, 'delivered')
+  assert.equal(row?.deliveredAt, '2023-11-14T22:20:00.000Z', 'a delivered handoff is not re-marked')
+})
+
+test('two boots keep the handoff obligation until the delivered turn settles', async () => {
+  const store = fakeStore({
+    plan: pausedPlan({
+      sessions: [{ sessionId: 'owner', intent: 'continue', epoch: 1, running: false, lastTurn: null, handoff: 'job', handoffPhase: 'pending', job: { id: 'j1' } }],
+      jobs: [{ id: 'j1', owner: 'owner', status: 'running', stop: 'stopped' }],
+    }),
+  })
+  const first = engineFor({
+    store,
+    bootId: 'boot-1',
+    probe: probeFor({ restoreSession: async () => ({ status: 'restored', turn: 3, detail: 'continued', continued: true }) }),
+  })
+  const one = await first.engine.resume()
+  assert.equal(one.status, 'partial')
+  assert.equal(store.read().sessions.find((item) => item.sessionId === 'owner')?.handoffPhase, 'delivered')
+
+  // A new process re-checks the delivered row instead of trusting the old journal or the old turn.
+  const second = engineFor({
+    store,
+    bootId: 'boot-2',
+    probe: probeFor({ restoreSession: async () => ({ status: 'restored', turn: 3, detail: 'still running', continued: false }) }),
+  })
+  const two = await second.engine.resume()
+  assert.equal(two.status, 'partial')
+  assert.equal(store.state.consumed, null)
+  assert.equal(store.read().sessions.find((item) => item.sessionId === 'owner')?.handoffPhase, 'delivered')
+
+  const third = engineFor({
+    store,
+    bootId: 'boot-3',
+    probe: probeFor({ restoreSession: async () => ({ status: 'skipped', turn: 4, detail: 'handoff turn completed at 4', continued: false }) }),
+  })
+  const three = await third.engine.resume()
+  assert.equal(three.status, 'resumed')
+  assert.notEqual(store.state.consumed, null)
+  assert.equal(store.read(), null)
+})
+
+// §2.7 — a stale pending goal credential belongs to an older revision. Re-arming must write a fresh
+// intent for the current revision, and a failed checkpoint write must not lose that intent.
+test('a stale pending goal restore is re-armed with the current revision', async () => {
+  const plan = pausedPlan({
+    goals: [{ sessionId: 's1', goalId: 'g1', revision: 7, pendingRestore: { revision: 5, expect: 6, at: '2023-11-14T22:00:00.000Z' } }],
+  })
+  const store = fakeStore({ plan })
+  let armedWith = null
+  const probe = probeFor({
+    prepareGoal: async (goal) => ({ status: 'ready', revision: Number.isSafeInteger(goal.revision) ? goal.revision : 0 }),
+    restoreGoal: async (goal) => {
+      armedWith = goal.pendingRestore ?? null
+      return { status: 'restored', revision: 8 }
+    },
+  })
+  const { engine } = engineFor({ store, probe })
+  const result = await engine.resume()
+
+  assert.equal(result.status, 'resumed')
+  assert.deepEqual(probe.calls.filter((call) => call[0] === 'prepareGoal'), [['prepareGoal', 'g1', 7]])
+  assert.equal(armedWith?.revision, 7, 'the old expect 6 must not be reused for revision 7')
+  assert.equal(armedWith?.expect, 8)
+  assert.equal(store.state.consumed?.goals?.[0]?.pendingRestore ?? null, null)
+})
+
+test('a stale pending goal that cannot be reconciled keeps its tracking and reports partial', async () => {
+  const plan = pausedPlan({
+    goals: [{ sessionId: 's1', goalId: 'g1', revision: 7, pendingRestore: { revision: 5, expect: 6, at: '2023-11-14T22:00:00.000Z' } }],
+  })
+  const store = fakeStore({ plan })
+  const probe = probeFor({ prepareGoal: async () => ({ status: 'skipped', detail: 'goal changed' }) })
+  const { engine } = engineFor({ store, probe })
+  const result = await engine.resume()
+
+  assert.equal(result.status, 'partial')
+  assert.equal(store.state.consumed, null)
+  assert.deepEqual(store.read().goals[0].pendingRestore, { revision: 5, expect: 6, at: '2023-11-14T22:00:00.000Z' })
+  assert.equal(probe.calls.some((call) => call[0] === 'restoreGoal'), false)
+  assert.equal(result.summary.failed.some((line) => /stale restore intent not reconciled/.test(line)), true)
+})
+
+test('a checkpoint write failure after the second rearm keeps the fresh intent on disk', async () => {
+  const plan = pausedPlan({
+    goals: [{ sessionId: 's1', goalId: 'g1', revision: 7, pendingRestore: { revision: 5, expect: 6, at: '2023-11-14T22:00:00.000Z' } }],
+  })
+  const store = fakeStore({
+    plan,
+    // Allow the fresh intent write, fail the write that would clear it after the restore.
+    failWrite: (count, next) => count > 0 && (next.goals?.[0]?.pendingRestore ?? null) === null,
+  })
+  const probe = probeFor({
+    prepareGoal: async (goal) => ({ status: 'ready', revision: Number.isSafeInteger(goal.revision) ? goal.revision : 0 }),
+    restoreGoal: async () => ({ status: 'restored', revision: 8 }),
+  })
+  const { engine } = engineFor({ store, probe })
+  const result = await engine.resume()
+
+  assert.equal(result.status, 'partial')
+  assert.equal(store.state.consumed, null)
+  const kept = store.read().goals[0].pendingRestore
+  assert.equal(kept?.revision, 7)
+  assert.equal(kept?.expect, 8)
+  assert.equal(result.summary.failed.some((line) => /checkpoint not saved/.test(line)), true)
+})
+
+// §2.8 — a pause cancels its own work. That abort is the pause succeeding, not a strike against the
+// row and not an error line in the summary.
+test('a continuation aborted by the pause is an interruption, not a failed attempt', async () => {
+  const plan = pausedPlan({ sessions: [{ sessionId: 's1', intent: 'continue', epoch: 2, running: true, lastTurn: 3 }] })
+  const store = fakeStore({ plan })
+  const probe = probeFor({ restoreSession: async () => ({ status: 'interrupted', detail: 'continuation turn was aborted', continued: false }) })
+  const { engine } = engineFor({ store, probe })
+  const result = await engine.resume()
+
+  assert.equal(result.status, 'partial')
+  assert.deepEqual(result.summary.failed, [])
+  assert.equal(result.summary.interrupted.length, 1)
+  assert.match(result.summary.interrupted[0], /aborted/)
+  assert.equal(store.state.consumed, null)
+  const kept = store.read()
+  assert.equal(kept.sessions[0].retry ?? null, null, 'an interrupted row keeps no failed-attempt mark')
+  assert.deepEqual(kept.restore?.interrupted, result.summary.interrupted)
 })
 
 

@@ -5,7 +5,8 @@ disk, and after a restart the same button puts that work back.
 
 * ⏸ — work is running. Press to stop it.
 * ▶ — work is stopped, or a previous process left work to restore. Press to restore it.
-* ⏸ dimmed — nothing to stop and nothing to restore.
+* ↻ — a turn stopped on its own. Press to continue what did not finish.
+* ⏸ dimmed — nothing to stop, restore or continue.
 
 The glyph is the only status. There is no counter, no panel, no badge and no toast, because a second
 indicator would be a second source of truth for the same fact. When the last press left something for
@@ -71,6 +72,34 @@ normally never enter the file.
 The same process reloading the plugin (hot reload) sees its own id and knows there is nothing to
 restore. A `pausing` plan found on disk means the press itself was interrupted: those sessions are
 left alone, and the button keeps offering the restore until a person presses it.
+
+## Stops that were not a press
+
+A turn can end without a person pressing anything: the provider returns an error after its own
+retries, or the model hits its output limit. Those turns are the one case a restart cannot fix on its
+own, so the plugin keeps a separate small ledger, `continue.json`, and offers ↻ instead of ▶. The
+ledger is independent of the pause plan: it never turns into a crash plan, never pauses or cancels
+anything, and never sends a message by itself.
+
+What becomes a candidate:
+
+* A session's latest turn ended `error` or `max-tokens`, and no later turn started or ended.
+* The session is a root session with no parent and is not a subagent. A child's stop is answered by
+  its parent's tool result; continuing the child alone would speak into a conversation nobody reads.
+* The turn did not end `completed`, `aborted`, `interrupted` or `blocked`. A manual pause aborts its
+  turn, so the stop a person asked for never appears here; a block before admission is work that
+  never ran and is left alone.
+
+The press continues the rows visible at that moment, two at a time, with an ordinary user message.
+It is not a retry loop: a row that fails stays in the ledger for the next press, and the button
+returns to ↻ when anything is still waiting. A row disappears when a newer turn starts, when the
+session is already open, when the goal is active, when the session is gone, or when the continued
+turn completes. Title comes from the session's own title event; nothing is loaded just to name a
+row. The batch is capped at 40 rows, and a row keeps its attempt number across failed presses.
+
+Starting a new message in a session that has a waiting row is a takeover: it clears that row without
+claiming anything about the old work. Work continues only after a press, never on plugin load, never
+on a timer, and never because the previous batch failed.
 
 ## Progressive restore (off by default)
 
@@ -187,6 +216,7 @@ All state lives under `$DSH_HOME/pause-resume/`:
 | `restores/<planId>.json` | the archived plan, kept as a record of the last restore |
 | `last-restore.json` | summary of the last restore |
 | `running.json` | sessions with an open turn, for crash residue |
+| `continue.json` | turns that stopped on their own and wait for one continue press |
 
 Every write is a unique temp file, `fsync`, `rename`, then a directory `fsync`. State is never inside
 the package.
@@ -201,8 +231,9 @@ npm run smoke:live   # real Host + local mock model stream: pause, SIGKILL, rest
 npm run smoke:maintenance  # real Host: pause cancels an in-flight compaction, apart from the session turn
 ```
 
-Verification records live in `docs/acceptance-0.6.9.md` (current release: the ten defects from the latest review,
-with the test-proven half and the still-independent half kept apart), `docs/acceptance-0.6.7.md` (a crash press that moved the
+Verification records live in `docs/acceptance-0.6.10.md` (current release: self-stopped turns, the one
+continue press, and the reliability work carried with it, with the proven and unproven halves kept
+apart), `docs/acceptance-0.6.9.md` (the ten defects from the previous review), `docs/acceptance-0.6.7.md` (a crash press that moved the
 button without restarting anything), `docs/acceptance-0.6.6.md` (an `unknown` row a person
 continued by hand and finished, child rows honouring the same intents as roots, the race window, and
 what is still unverified), `docs/acceptance-0.6.5.md` (0.6.5), `docs/acceptance-0.6.0.md` (0.6.0–0.6.1)

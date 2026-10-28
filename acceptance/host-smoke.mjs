@@ -218,6 +218,15 @@ try {
     const foreignHost = await request(host, '/dsh-pause-resume/state', { origin: false, hostOverride: 'evil.example' })
     log('foreign-host-rejected', { ok: foreignHost.status === 403, status: foreignHost.status, body: foreignHost.json })
 
+    const continueNoHeader = await request(host, '/dsh-pause-resume/continue', { method: 'POST', header: false })
+    log('continue-without-guard-header', { ok: continueNoHeader.status === 403, status: continueNoHeader.status, body: continueNoHeader.json })
+    const continueNoWork = await request(host, '/dsh-pause-resume/continue', { method: 'POST' })
+    log('continue-without-work', {
+      ok: continueNoWork.status === 409 && continueNoWork.json?.outcome?.status === 'empty',
+      status: continueNoWork.status,
+      body: continueNoWork.json,
+    })
+
     const paused = await request(host, '/dsh-pause-resume/pause', { method: 'POST' })
     log('pause-idle', {
       ok: paused.status === 200 && paused.json?.outcome?.status === 'idle',

@@ -14,6 +14,9 @@ window.__ModuleLoader__.load({
           partial: '部分内容未能恢复，可以再按一次', // ui-copy-ignore
           stopped: '上次暂停的内容还没有恢复', // ui-copy-ignore
           attention: '有内容需要你处理',
+          cont: '继续未完成的任务', // ui-copy-ignore
+          contCount: (n) => `${n} 个任务中断，点击继续`,
+          contAttention: (n) => `${n} 个任务上次没有恢复`,
         }
       : {
           pause: 'Pause', // ui-copy-ignore
@@ -23,6 +26,9 @@ window.__ModuleLoader__.load({
           partial: 'Some items were not restored; press again to retry',
           stopped: 'Work is still stopped',
           attention: 'Some items need a look',
+          cont: 'Continue unfinished work',
+          contCount: (n) => `${n} ${n === 1 ? 'task stopped' : 'tasks stopped'}, press to continue`,
+          contAttention: (n) => `${n} ${n === 1 ? 'task did' : 'tasks did'} not resume last time`,
         }
 
     const HOST_BASE = '/dsh-pause-resume' // ui-copy-ignore
@@ -47,7 +53,7 @@ window.__ModuleLoader__.load({
       error: null, // ui-copy-ignore
     }
 
-    // A deadline must also release the request, not only stop waiting for it: a Host that keeps
+    // A deadline must also release the request, not only stop waiting for it: a server that keeps
     // the socket open would otherwise leave one hung request per timeout until the browser's per
     // origin connection pool is full and every later poll queues behind dead requests.
     function withTimeout(promise, ms = REQUEST_MS, controller = null) {
@@ -150,9 +156,19 @@ window.__ModuleLoader__.load({
       width: 16, height: 16, viewBox: '0 0 16 16', fill: 'currentColor', 'aria-hidden': true,
     }, h('path', { d: 'M5.2 3.4a.7.7 0 0 0-1.05.6v8a.7.7 0 0 0 1.05.6l6.9-4a.7.7 0 0 0 0-1.2l-6.9-4z' }))
     const SPIN_GLYPH = icon(['M8 2.5a5.5 5.5 0 1 1-4.3 2.06'], SPIN_STYLE)
+    // A retry arrow, not the play triangle: "continue what stopped" is a different act from
+    // "resume what I paused", and the same glyph for both made the button look like it did one thing.
+    const CONTINUE_GLYPH = icon(['M13 8a5 5 0 1 1-1.46-3.54', 'M13 2.8v2.6h-2.6'])
 
     /** The one sentence behind the button, in the tooltip only: the button itself stays a glyph. */
     function hintOf(state) {
+      if (state.action === 'continue') {
+        const pending = state.pendingContinue ?? {}
+        const count = Number.isInteger(pending.count) && pending.count > 0 ? pending.count : 0
+        const failed = Number.isInteger(pending.attention) && pending.attention > 0 ? pending.attention : 0
+        const base = count > 0 ? COPY.contCount(count) : COPY.cont
+        return failed > 0 ? `${base} · ${COPY.contAttention(failed)}` : base
+      }
       const focus = typeof state.focus === 'string' && state.focus !== '' ? state.focus : ''
       if (state.error === 'restore-partial') return focus === '' ? COPY.partial : `${COPY.partial}: ${focus}`
       if (state.error !== null && state.error !== undefined) return focus === '' ? COPY.error : `${COPY.error}: ${focus}`
@@ -234,7 +250,7 @@ window.__ModuleLoader__.load({
         }
       }, [pull])
 
-      const action = state.action === 'pause' || state.action === 'resume' ? state.action : null
+      const action = state.action === 'pause' || state.action === 'resume' || state.action === 'continue' ? state.action : null
       /**
        * A resume request can stay open for the whole restore, and the Host answers `pause` while it // ui-copy-ignore
        * is resuming. That answer is the same page's way back out: the glyph returns to the pause
@@ -292,8 +308,8 @@ window.__ModuleLoader__.load({
           ? { ...BUTTON_STYLE, opacity: 1, background: 'var(--dsh-color-surface-hover, rgba(127,127,127,0.14))' }
           : BUTTON_STYLE
 
-      const glyph = busy ? SPIN_GLYPH : action === 'resume' ? PLAY_GLYPH : PAUSE_GLYPH
-      const label = busy ? COPY.busy : action === 'resume' ? COPY.resume : COPY.pause
+      const glyph = busy ? SPIN_GLYPH : action === 'continue' ? CONTINUE_GLYPH : action === 'resume' ? PLAY_GLYPH : PAUSE_GLYPH
+      const label = busy ? COPY.busy : action === 'continue' ? COPY.cont : action === 'resume' ? COPY.resume : COPY.pause
       const hint = hintOf(state)
 
       return h('button', {

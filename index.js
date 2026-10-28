@@ -6,7 +6,8 @@ import { createEngine } from './lib/engine.js'
 import { nextEpoch, currentEpoch, dropEpoch } from './lib/epoch.js'
 import { createHeartbeat } from './lib/heartbeat.js'
 import { createProbe, listResidue } from './lib/probe.js'
-import { createGate } from './lib/gate.js'
+import { createGate, streamOutcome } from './lib/gate.js'
+import { createLedger } from './lib/ledger.js'
 
 export const name = 'dsh-pause-resume'
 
@@ -133,7 +134,7 @@ function guard(handler) {
   }
 }
 
-function serve(ctx, engine, heartbeat, options, ready) {
+function serve(ctx, engine, heartbeat, ledger, options, ready) {
   const server = service(ctx, 'webServer')
   if (server === undefined || server === null || typeof server.register !== 'function') {
     log('no web server: the header button cannot ask for a pause')
@@ -156,12 +157,38 @@ function serve(ctx, engine, heartbeat, options, ready) {
     if (disposed === true) return sendJson(res, 503, { status: 'starting' })
     return handler(req, res)
   })
+  /**
+   * What a state answer shows: the engine's own state, plus the reminder of work that stopped on its
+   * own. `action` keeps one meaning for the button — there is at most one press it can make now.
+   */
+  const stateOf = () => {
+    const pending = ledger.describe()
+    const state = { ...engine.describe(), version: VERSION }
+    if (pending.count > 0 || pending.busy === true) state.pendingContinue = pending
+    if (state.action === 'none' && pending.busy === true) state.action = 'busy'
+    else if (state.action === 'none' && pending.count > 0) state.action = 'continue'
+    return state
+  }
   const handlers = [
     [
       `${BASE_PATH}/state`,
       route(async (req, res) => {
-        sendJson(res, 200, { ...engine.describe(), version: VERSION })
+        sendJson(res, 200, stateOf())
       }, true),
+    ],
+    [
+      `${BASE_PATH}/continue`,
+      route(async (req, res) => {
+        // A press is only a continue press when the state that offered it was a continue press. A
+        // pause or resume in flight owns the button, and a second batch is refused by the ledger.
+        const now = stateOf()
+        if (now.action !== 'continue') {
+          return sendJson(res, 409, { ...now, outcome: { status: now.action === 'busy' ? 'busy' : 'empty' } })
+        }
+        const outcome = await ledger.continueAll()
+        log(`continue: ${outcome.status} (${outcome.continued}/${outcome.attempted})`)
+        sendJson(res, 200, { ...stateOf(), outcome })
+      }, false),
     ],
     [
       `${BASE_PATH}/pause`,
@@ -245,17 +272,60 @@ export function apply(ctx, config = {}) {
     // the message, and must not lose it either.
     onAdmitted: (sessionId, requestId) => {
       // From here on this session's turn belongs to the restore batch: its later model calls must
-      // stay inside the slot budget even if the first stream already ended.
+      // stay inside the slot budget even if the first stream already ended. Idempotent, because the
+      // admission path can observe the same session on more than one edge.
       try {
-        gate.track(sessionId)
+        gate.admitted(sessionId)
       } catch {
         /* the gate may already be disposed */
       }
       return engineRef?.recordAdmission(sessionId, requestId) !== false
     },
+    // The shipped controller emits `turn/start` synchronously inside `prompt()`, before the caller
+    // learns the request was admitted. Reserving the pending start immediately before the prompt is
+    // the only point at which that event can be counted instead of dropped.
+    onReserve: (sessionId) => {
+      try {
+        gate.reserve(sessionId)
+      } catch {
+        /* the gate may already be disposed */
+      }
+    },
+    onAbandon: (sessionId) => {
+      try {
+        gate.abandon(sessionId)
+      } catch {
+        /* the gate may already be disposed */
+      }
+    },
     graceMs: Number.isFinite(config?.graceMs) ? config.graceMs : 2000,
     continueText: typeof config?.continueText === 'string' ? config.continueText : undefined,
   })
+  /**
+   * The reminder of turns that stopped on their own. It reads every event but persists at most one
+   * small row per session; a title cache names a row without loading the session. Child sessions are
+   * left to their parent's own turn: continuing one on its own would answer into a conversation no
+   * person is looking at.
+   */
+  const ledger = createLedger({ dir, probe, log })
+  let disposeLedger = () => {}
+  if (typeof ctx.on === 'function') {
+    try {
+      const off = ctx.on('session/event', (session, event) => {
+        try {
+          const header = session?.header
+          const parent = typeof header?.parentSession === 'string' && header.parentSession !== '' ? header.parentSession : null
+          const origin = header?.origin === 'subagent' ? 'subagent' : null
+          ledger.observe(session?.id, event, { parent, origin })
+        } catch (error) {
+          log(`cannot record a stopped turn: ${error?.message ?? error}`)
+        }
+      })
+      if (typeof off === 'function') disposeLedger = off
+    } catch (error) {
+      log(`cannot follow stopped turns: ${error?.message ?? error}`)
+    }
+  }
   const epoch = nextEpoch()
   /** Progressive restore is an opt-in capacity measure, not part of the pause guarantee. */
   const progressive = config?.restoreProgressive === true
@@ -301,6 +371,11 @@ export function apply(ctx, config = {}) {
     } catch {
       /* the listener may already be gone */
     }
+    try {
+      disposeLedger()
+    } catch {
+      /* the listener may already be gone */
+    }
     // The in-flight press, if any, checks this and refuses to write its stale result.
     dropEpoch(epoch)
     // A pending restore must not keep waiting on a permit nobody will release: the instance is gone,
@@ -329,6 +404,10 @@ export function apply(ctx, config = {}) {
       const off = ctx.on('llm/stream', (options, next) => {
         if (gate.enabled() === false) return next()
         if (typeof options?.sessionId !== 'string') return next()
+        // Only the restore batch is limited. A person typing in another session while a restore
+        // runs keeps the ordinary request path: queuing it behind restored sessions would turn a
+        // capacity measure into a stall of the whole harness.
+        if (gate.scopes(options.sessionId) === false) return next()
         return (async function* limited() {
           const ticket = await gate.acquire({
             sessionId: options.sessionId,
@@ -337,21 +416,23 @@ export function apply(ctx, config = {}) {
             model: options.model,
           }, options.signal ?? null)
           let ended = false
-          let healthy = false
+          let kind = null
           try {
             for await (const chunk of next()) {
-              if (chunk?.type === 'finish') {
-                const kind = chunk?.reason?.kind
-                healthy = kind !== 'error' && kind !== 'aborted'
-              }
+              if (chunk?.type === 'finish') kind = chunk?.reason?.kind ?? null
               yield chunk
             }
             ended = true
           } finally {
             // A consumer that walks away mid-stream (pause, abort, a cancelled turn) is not an
             // upstream failure: release without a strike, or the gate would cool down because the
-            // person pressed pause.
-            gate.release(ticket, ended ? (healthy ? 'ok' : 'error') : 'cancelled')
+            // person pressed pause. The same holds for a full-consumption `aborted` that our own
+            // pause signal caused; only an upstream abort/error earns a strike.
+            gate.release(ticket, streamOutcome({
+              ended,
+              kind,
+              aborted: options.signal?.aborted === true,
+            }))
           }
         })()
       })
@@ -363,9 +444,17 @@ export function apply(ctx, config = {}) {
       if (typeof ctx.on === 'function') {
         try {
           const offTurn = ctx.on('session/event', (session, event) => {
-            if (gate.enabled() === false || typeof session?.id !== 'string') return
-            if (event?.type === 'turn/start') gate.turnOpen(session.id)
-            else if (event?.type === 'turn/end') gate.turnEnd(session.id)
+            if (typeof session?.id !== 'string') return
+            // Scope is decided inside the gate, not by `enabled()`: a `turn/start` that arrives after
+            // an early drain closed still belongs to the batch for its bounded window, and only the
+            // gate knows which sessions that batch reserved or tracked. Any other session's turn is
+            // ignored there, so an unrelated conversation never reaches the queue.
+            try {
+              if (event?.type === 'turn/start') gate.turnOpen(session.id)
+              else if (event?.type === 'turn/end') gate.turnEnd(session.id)
+            } catch (error) {
+              log(`cannot record a restore turn edge: ${error?.message ?? error}`)
+            }
           })
           if (typeof offTurn === 'function') disposeTurns = offTurn
         } catch (error) {
@@ -422,7 +511,7 @@ export function apply(ctx, config = {}) {
   let routeDispose = () => {}
   let injectDispose = () => {}
   const mount = (scope) => {
-    routeDispose = serve(scope, engine, heartbeat, { allowRemote }, ready)
+    routeDispose = serve(scope, engine, heartbeat, ledger, { allowRemote }, ready)
     if (disposed) {
       routeDispose()
       routeDispose = () => {}
@@ -461,5 +550,5 @@ export function apply(ctx, config = {}) {
     }
   })()
 
-  return { store, engine, heartbeat, gate }
+  return { store, engine, heartbeat, gate, ledger }
 }

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-28T11:50:19.917Z",
+  "generatedAt": "2026-10-28T13:53:36.662Z",
   "kind": "host-maintenance",
   "plugin": {
     "name": "dsh-pause-resume",
@@ -14,7 +14,7 @@
     "profile": "maint",
     "baseProfile": "web",
     "note": "throwaway DSH_HOME and OS-assigned port; the real ~/.dsh profile is not read or written",
-    "port": "http://127.0.0.1:64172"
+    "port": "http://127.0.0.1:58749"
   },
   "mock": {
     "kind": "inline openai-completions mock",
@@ -27,11 +27,11 @@
         "stream": true,
         "messages": 5,
         "lastRole": "user",
-        "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T19:50:21+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
+        "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T21:53:38+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
         "targetTurn": false,
         "summary": false,
         "held": true,
-        "finishedAt": "2026-10-28T11:50:24.405Z",
+        "finishedAt": "2026-10-28T13:53:41.228Z",
         "closed": true
       },
       {
@@ -43,7 +43,7 @@
         "targetTurn": false,
         "summary": true,
         "held": false,
-        "finishedAt": "2026-10-28T11:50:21.231Z",
+        "finishedAt": "2026-10-28T13:53:38.074Z",
         "closed": false
       },
       {
@@ -51,11 +51,11 @@
         "stream": true,
         "messages": 5,
         "lastRole": "user",
-        "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T19:50:21+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
+        "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T21:53:38+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
         "targetTurn": true,
         "summary": false,
         "held": false,
-        "finishedAt": "2026-10-28T11:50:22.052Z",
+        "finishedAt": "2026-10-28T13:53:38.867Z",
         "closed": null
       },
       {
@@ -67,7 +67,7 @@
         "targetTurn": false,
         "summary": true,
         "held": false,
-        "finishedAt": "2026-10-28T11:50:21.675Z",
+        "finishedAt": "2026-10-28T13:53:38.490Z",
         "closed": false
       },
       {
@@ -79,7 +79,7 @@
         "targetTurn": false,
         "summary": true,
         "held": false,
-        "finishedAt": "2026-10-28T11:50:24.003Z",
+        "finishedAt": "2026-10-28T13:53:40.833Z",
         "closed": false
       },
       {
@@ -104,7 +104,7 @@
   "steps": [
     {
       "step": "profile-created",
-      "at": "2026-10-28T11:50:20.053Z",
+      "at": "2026-10-28T13:53:36.784Z",
       "ok": true,
       "code": 0,
       "profile": "maint",
@@ -113,7 +113,7 @@
     },
     {
       "step": "plugin-installed",
-      "at": "2026-10-28T11:50:20.456Z",
+      "at": "2026-10-28T13:53:37.264Z",
       "ok": true,
       "code": 0,
       "plugin": "<repo>",
@@ -121,33 +121,33 @@
     },
     {
       "step": "model-overridden",
-      "at": "2026-10-28T11:50:20.460Z",
+      "at": "2026-10-28T13:53:37.269Z",
       "ok": true,
       "provider": "mock",
       "api": "openai-completions",
-      "baseURL": "http://127.0.0.1:64171/v1",
+      "baseURL": "http://127.0.0.1:58748/v1",
       "contextWindow": 8000,
       "maxTokens": 256,
       "command": "/compact"
     },
     {
       "step": "host-ready",
-      "at": "2026-10-28T11:50:21.074Z",
+      "at": "2026-10-28T13:53:37.889Z",
       "ok": true,
-      "url": "http://127.0.0.1:64172"
+      "url": "http://127.0.0.1:58749"
     },
     {
       "step": "holder-turn-observed",
-      "at": "2026-10-28T11:50:21.276Z",
+      "at": "2026-10-28T13:53:38.091Z",
       "ok": true,
       "n": 1,
       "stream": true,
-      "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T19:50:21+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
+      "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T21:53:38+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
       "held": true
     },
     {
       "step": "turn-finished",
-      "at": "2026-10-28T11:50:24.009Z",
+      "at": "2026-10-28T13:53:40.936Z",
       "ok": true,
       "sessionId": "spike-maintenance",
       "kind": "idle",
@@ -155,7 +155,7 @@
     },
     {
       "step": "maintenance-observed",
-      "at": "2026-10-28T11:50:24.316Z",
+      "at": "2026-10-28T13:53:41.141Z",
       "ok": true,
       "observedPhases": [
         "idle/idle",
@@ -167,7 +167,7 @@
         "idle/idle",
         "running/running"
       ],
-      "maintenanceAt": "2026-10-28T11:50:24.267Z",
+      "maintenanceAt": "2026-10-28T13:53:41.106Z",
       "heldRequest": {
         "n": 6,
         "stream": true,
@@ -179,7 +179,7 @@
     },
     {
       "step": "paused",
-      "at": "2026-10-28T11:50:24.486Z",
+      "at": "2026-10-28T13:53:41.313Z",
       "ok": true,
       "status": 200,
       "outcome": {
@@ -191,7 +191,7 @@
         },
         "outstanding": 1
       },
-      "pauseMs": 168,
+      "pauseMs": 171,
       "liveSessions": 0,
       "maintenanceCanceled": [
         "spike-maintenance"
@@ -228,6 +228,9 @@
           "queued": 0,
           "openTurns": 0,
           "tracked": 0,
+          "reserved": 0,
+          "restored": 0,
+          "late": 0,
           "dispatched": 0,
           "failed": 0,
           "interrupted": 0,
@@ -238,7 +241,7 @@
     },
     {
       "step": "maintenance-canceled-apart",
-      "at": "2026-10-28T11:50:24.486Z",
+      "at": "2026-10-28T13:53:41.313Z",
       "ok": true,
       "planFile": "snapshot.json",
       "planStatus": "paused",
@@ -259,10 +262,10 @@
     },
     {
       "step": "maintenance-cleared",
-      "at": "2026-10-28T11:50:24.487Z",
+      "at": "2026-10-28T13:53:41.314Z",
       "ok": true,
       "settled": {
-        "at": "2026-10-28T11:50:24.333Z",
+        "at": "2026-10-28T13:53:41.157Z",
         "event": "compact-settled",
         "sessionId": "spike-maintenance",
         "kind": "idle",
@@ -276,7 +279,7 @@
         }
       },
       "idleAfterPause": {
-        "at": "2026-10-28T11:50:24.333Z",
+        "at": "2026-10-28T13:53:41.157Z",
         "event": "phase",
         "sessionId": "spike-maintenance",
         "kind": "idle",
@@ -286,7 +289,7 @@
     },
     {
       "step": "pause-not-waiting",
-      "at": "2026-10-28T11:50:24.489Z",
+      "at": "2026-10-28T13:53:41.315Z",
       "ok": true,
       "phase": "paused",
       "outstanding": 1,
@@ -317,7 +320,7 @@
     "holderRequest": {
       "n": 1,
       "stream": true,
-      "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T19:50:21+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
+      "lastText": "Time sampled while preparing turn 1, step 1: 2026-10-28T21:53:38+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\nEl",
       "held": true
     },
     "observedPhases": [
@@ -348,7 +351,7 @@
         },
         "outstanding": 1
       },
-      "pauseMs": 168
+      "pauseMs": 171
     },
     "plan": {
       "file": "snapshot.json",
@@ -371,7 +374,7 @@
     },
     "cleared": {
       "settled": {
-        "at": "2026-10-28T11:50:24.333Z",
+        "at": "2026-10-28T13:53:41.157Z",
         "event": "compact-settled",
         "sessionId": "spike-maintenance",
         "kind": "idle",
@@ -385,7 +388,7 @@
         }
       },
       "idleAfterPause": {
-        "at": "2026-10-28T11:50:24.333Z",
+        "at": "2026-10-28T13:53:41.157Z",
         "event": "phase",
         "sessionId": "spike-maintenance",
         "kind": "idle",

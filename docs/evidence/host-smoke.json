@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-28T11:48:18.071Z",
+  "generatedAt": "2026-10-28T13:54:16.263Z",
   "plugin": {
     "name": "dsh-pause-resume",
     "version": "0.6.9"
@@ -13,33 +13,33 @@
   "steps": [
     {
       "step": "create-profile",
-      "at": "2026-10-28T11:48:18.247Z",
+      "at": "2026-10-28T13:54:16.400Z",
       "ok": true,
       "code": 0,
       "stderr": ""
     },
     {
       "step": "install-plugin",
-      "at": "2026-10-28T11:48:18.653Z",
+      "at": "2026-10-28T13:54:16.862Z",
       "ok": true,
       "code": 0,
       "stderr": ""
     },
     {
       "step": "mount-entry",
-      "at": "2026-10-28T11:48:18.653Z",
+      "at": "2026-10-28T13:54:16.863Z",
       "ok": true,
       "patch": "- insert:\n    - id: dsh-pause-resume\n      name: 'dsh-pause-resume'"
     },
     {
       "step": "boot",
-      "at": "2026-10-28T11:48:19.423Z",
+      "at": "2026-10-28T13:54:17.577Z",
       "ok": true,
-      "url": "http://127.0.0.1:61712"
+      "url": "http://127.0.0.1:59159"
     },
     {
       "step": "state-after-boot",
-      "at": "2026-10-28T11:48:19.475Z",
+      "at": "2026-10-28T13:54:17.622Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -69,13 +69,13 @@
     },
     {
       "step": "state-head",
-      "at": "2026-10-28T11:48:19.476Z",
+      "at": "2026-10-28T13:54:17.624Z",
       "ok": true,
       "status": 200
     },
     {
       "step": "state-without-guard-header",
-      "at": "2026-10-28T11:48:19.477Z",
+      "at": "2026-10-28T13:54:17.624Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -105,7 +105,7 @@
     },
     {
       "step": "foreign-origin-rejected",
-      "at": "2026-10-28T11:48:19.477Z",
+      "at": "2026-10-28T13:54:17.625Z",
       "ok": true,
       "status": 403,
       "body": {
@@ -114,7 +114,7 @@
     },
     {
       "step": "foreign-host-rejected",
-      "at": "2026-10-28T11:48:19.479Z",
+      "at": "2026-10-28T13:54:17.627Z",
       "ok": true,
       "status": 403,
       "body": {
@@ -122,8 +122,50 @@
       }
     },
     {
+      "step": "continue-without-guard-header",
+      "at": "2026-10-28T13:54:17.627Z",
+      "ok": true,
+      "status": 403,
+      "body": {
+        "status": "forbidden"
+      }
+    },
+    {
+      "step": "continue-without-work",
+      "at": "2026-10-28T13:54:17.628Z",
+      "ok": true,
+      "status": 409,
+      "body": {
+        "phase": "idle",
+        "action": "none",
+        "source": null,
+        "complete": null,
+        "outstanding": 0,
+        "counts": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0
+        },
+        "live": {
+          "sessions": 0,
+          "goals": 0,
+          "jobs": 0,
+          "maintenance": 0
+        },
+        "attention": 0,
+        "focus": null,
+        "error": null,
+        "result": null,
+        "restore": null,
+        "version": "0.6.9",
+        "outcome": {
+          "status": "empty"
+        }
+      }
+    },
+    {
       "step": "pause-idle",
-      "at": "2026-10-28T11:48:19.480Z",
+      "at": "2026-10-28T13:54:17.629Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -157,7 +199,7 @@
     },
     {
       "step": "pause-idle-again",
-      "at": "2026-10-28T11:48:19.481Z",
+      "at": "2026-10-28T13:54:17.630Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -191,7 +233,7 @@
     },
     {
       "step": "no-plan-created-by-idle-pause",
-      "at": "2026-10-28T11:48:19.481Z",
+      "at": "2026-10-28T13:54:17.631Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -221,7 +263,7 @@
     },
     {
       "step": "state-dir",
-      "at": "2026-10-28T11:48:19.481Z",
+      "at": "2026-10-28T13:54:17.631Z",
       "ok": true,
       "files": [
         "running.json"
@@ -229,7 +271,7 @@
     },
     {
       "step": "state-after-restart",
-      "at": "2026-10-28T11:48:20.162Z",
+      "at": "2026-10-28T13:54:18.416Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -259,7 +301,7 @@
     },
     {
       "step": "resume-without-plan",
-      "at": "2026-10-28T11:48:20.163Z",
+      "at": "2026-10-28T13:54:18.416Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -292,7 +334,7 @@
     },
     {
       "step": "plugin-ready-line",
-      "at": "2026-10-28T11:48:20.163Z",
+      "at": "2026-10-28T13:54:18.416Z",
       "ok": true,
       "lines": [
         "[dsh-pause-resume] ready (idle)",

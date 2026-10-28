@@ -1,3 +1,17 @@
+## 0.6.10
+
+- Turns that stop on their own now have a home: a turn whose latest end is `error` or `max-tokens`, with no later start or end, becomes one “继续未完成的任务” row in a new independent ledger (`continue.json`). A person presses ↻ once and the visible rows are continued two at a time with ordinary user messages. Nothing is sent on load, on a timer, or automatically after a failed batch; a row that fails waits for the next press.
+- The continue set is deliberately narrow. `completed`, `aborted`, `interrupted` and `blocked` clear a row, so a turn a person stopped by pressing pause never comes back as unrequested work. Child and subagent sessions are excluded: their stop is answered by the parent's tool result, not by talking to the child directly. A new message in a session clears its row as a takeover.
+- An `error` end is not owed to a crash or pause restore. The existing restore paths keep their behaviour; only the explicit continue press passes `allowAbnormalEnd`, which is what makes an upstream failure actionable without turning every restart into a retry of a broken provider.
+- The button gained a third action and a retry-arrow glyph. `/state` reports `pendingContinue {count, attention, busy, tasks}` and the decorated `action`; `/continue` accepts a press only when that decorated action is `continue`, otherwise it answers 409. The tooltip carries the count and how many rows need attention; the button itself stays glyph-only.
+- Reliability work carried in the same tree:
+  - The restore gate is batch-scoped and reservation-aware. A prompt that emits `turn/start` before returning is counted from the reservation, a late start inside a bounded window reopens the batch instead of bypassing the limit, and a person's stream in an unrelated session is never queued behind a restore.
+  - A stream cancelled by the person's own pause is neither a success nor a failure strike; only an upstream abort/error earns a cooldown.
+  - A job handoff row now has a lifecycle (`pending` → `delivered` → `completed`). Delivery is not acknowledgement: an old completed owner turn cannot spend a pending row, a delivered row survives a reboot until its own turn proves completion, and a skipped answer keeps the obligation.
+  - A stale pending goal restore is re-armed with the goal's current revision, and a goal whose rearm cannot be persisted keeps its tracking and reports `partial` instead of losing the intent.
+  - A heartbeat one round behind no longer skips work: an unclosed later turn and a trailing `turn/start` are owed work, and a cold child's raw unclosed log is continued rather than reported running.
+  - Crash and mount rows re-read the durable turn log before closing; a settled job is evidence for handoff, not live work; an awaited job reader is parked so a late settlement cannot wake the owner.
+
 ## 0.6.9
 
 - A completed turn from before the pause is no longer used to settle a newer turn the plan still owes. A stale `completed` end used to satisfy the turn check for any turn, which let the press skip the continuation turn 2 still owed; only an end at or after the owed turn can answer for it, and a newer owed turn with an older readable end is held as `unknown` instead of prompted.

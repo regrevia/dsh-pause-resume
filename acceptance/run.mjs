@@ -19,6 +19,7 @@ import { createStore } from '../lib/snapshot.js'
 import { createHeartbeat } from '../lib/heartbeat.js'
 import { createEngine } from '../lib/engine.js'
 import { createProbe } from '../lib/probe.js'
+import { createLedger } from '../lib/ledger.js'
 
 const results = []
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -501,6 +502,33 @@ await scenario('R11-R12', 'parent routes decide restore order and a lost parent 
   return { order, status: outcome.status }
 })
 
+// R14: a turn the model provider failed is offered, continued by the one press, and never resent.
+await scenario('R14', 'an upstream failure becomes one continue press and only one delivery', async (root) => {
+  const h = harness()
+  h.addSession({ sessionId: 'stop1', running: false, lastTurn: 3, ends: [{ turn: 3, kind: 'error' }] })
+  const probe = probeOf(h, { dshHome: root, settleMs: 80 })
+  let clock = 1_000
+  const ledger = createLedger({ dir: root, probe, now: () => clock })
+  ledger.observe('stop1', {
+    type: 'turn/end',
+    seq: 9,
+    time: 1_000,
+    data: { turn: 3, reason: { kind: 'error', error: { message: 'upstream 502', code: 'SERVER' } } },
+  })
+  clock = 3_000
+  const view = ledger.describe()
+  assert.equal(view.count, 1, `the stopped turn is offered: ${JSON.stringify(view)}`)
+  assert.equal(view.tasks[0].kind, 'error')
+  const outcome = await ledger.continueAll()
+  assert.equal(outcome.continued, 1, `the press continues it: ${JSON.stringify(outcome)}`)
+  assert.equal(outcome.remaining, 0)
+  assert.equal(h.prompts.length, 1, 'exactly one message is delivered')
+  const again = await ledger.continueAll()
+  assert.equal(again.status, 'empty')
+  assert.equal(h.prompts.length, 1, 'a second press does not resend work already running')
+  return { offered: view.count, continued: outcome.continued }
+})
+
 const summary = {
   generatedAt: new Date().toISOString(),
   node: process.version,
@@ -520,6 +548,6 @@ const evidence = new URL('../docs/evidence/acceptance-run.json', import.meta.url
 fs.mkdirSync(path.dirname(fileURLToPath(evidence)), { recursive: true })
 fs.writeFileSync(evidence, redactedJson(summary))
 console.log(JSON.stringify(summary, null, 2))
-// Strict gate: seven scenarios exist and every one of them must pass. A run that silently loses a
+// Strict gate: eight scenarios exist and every one of them must pass. A run that silently loses a
 // scenario (`|| true`, a swallowed assertion) must not exit 0.
-if (summary.passed + summary.failed !== 7 || summary.failed !== 0) process.exitCode = 1
+if (summary.passed + summary.failed !== 8 || summary.failed !== 0) process.exitCode = 1

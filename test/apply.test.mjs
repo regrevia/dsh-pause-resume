@@ -19,7 +19,7 @@ async function mount(services = {}, home = mkdtempSync(join(tmpdir(), 'dsh-pause
     agents: { get: () => undefined, list: () => [], resume: async () => {} },
     ...services,
   }
-  apply({ get: (key) => registry[key], effect: (fn) => cleanups.push(fn), on: () => {} }, {})
+  const plugin = apply({ get: (key) => registry[key], effect: (fn) => cleanups.push(fn), on: () => {} }, {})
   await new Promise((resolve) => setTimeout(resolve, 250))
   const call = async (path, request = {}) => {
     const route = routes.find((entry) => entry.path === path)
@@ -28,12 +28,13 @@ async function mount(services = {}, home = mkdtempSync(join(tmpdir(), 'dsh-pause
     await route.handler({ method: 'GET', headers: { host: '127.0.0.1:54601' }, ...request }, answer)
     return { status: answer.status, value: answer.body === '' ? null : JSON.parse(answer.body) }
   }
-  return { routes, cleanups, call, home }
+  return { routes, cleanups, call, home, ledger: plugin.ledger }
 }
 
-test('the mount registers the three routes and answers state', async () => {
+test('the mount registers the four routes and answers state', async () => {
   const { routes, call } = await mount()
   assert.deepEqual(routes.map((route) => route.path).sort(), [
+    '/dsh-pause-resume/continue',
     '/dsh-pause-resume/pause',
     '/dsh-pause-resume/resume',
     '/dsh-pause-resume/state',
@@ -109,7 +110,7 @@ test('routes exist before hydration settles and state waits for it', async () =>
   apply({ get: (key) => registry[key], effect: () => {}, on: () => {} }, {})
   // The Host freezes its route table when the server starts; a late register is a live 404 and the
   // header button cannot ask for anything. Registration must therefore finish inside `apply`.
-  assert.equal(routes.length, 3, 'routes are registered synchronously')
+  assert.equal(routes.length, 4, 'routes are registered synchronously')
   const route = routes.find((entry) => entry.path === '/dsh-pause-resume/state')
   const answer = { headersSent: false, status: 0, body: '', writeHead(status) { this.status = status }, end(body) { this.body = body ?? '' } }
   await route.handler({ method: 'GET', headers: { host: '127.0.0.1:54601' } }, answer)
@@ -142,9 +143,61 @@ test('a plugin applied before the web server mounts its routes once the service 
   pending.fn({ get: (key) => (key === 'webServer' ? { register: (route) => routes.push(route) } : registry[key]) })
   await new Promise((resolve) => setTimeout(resolve, 50))
   assert.deepEqual(routes.map((route) => route.path).sort(), [
+    '/dsh-pause-resume/continue',
     '/dsh-pause-resume/pause',
     '/dsh-pause-resume/resume',
     '/dsh-pause-resume/state',
   ])
   rmSync(home, { recursive: true, force: true })
+})
+
+
+test('stopped work becomes the one continue press, and only when no other press owns the button', async () => {
+  const { call, ledger } = await mount()
+  ledger.describe = () => ({ count: 2, attention: 1, busy: false, tasks: [{ sessionId: 's1', turn: 4, kind: 'error', status: 'waiting', title: '修复登录', at: 1, attempt: 0 }] })
+  const state = await call('/dsh-pause-resume/state')
+  assert.equal(state.value.action, 'continue')
+  assert.equal(state.value.pendingContinue.count, 2)
+  let pressed = 0
+  ledger.continueAll = async () => {
+    pressed += 1
+    return { status: 'accepted', attempted: 2, continued: 2, remaining: 0, attention: 0, results: [] }
+  }
+  const answer = await call('/dsh-pause-resume/continue', { method: 'POST', headers: { host: '127.0.0.1:54601', 'x-dsh-pause-resume': '1' } })
+  assert.equal(answer.status, 200)
+  assert.equal(answer.value.outcome.continued, 2)
+  assert.equal(pressed, 1)
+})
+
+test('a pause press owns the button, so continuing waiting work is refused', async () => {
+  const { call, ledger } = await mount({
+    agents: {
+      get: (id) => (id === 's1' ? { id: 's1', status: 'running', phase: { lastTurn: 1 } } : undefined),
+      list: () => [{ id: 's1', status: 'running', phase: { lastTurn: 1 } }],
+    },
+  })
+  ledger.describe = () => ({ count: 1, attention: 0, busy: false, tasks: [] })
+  let pressed = 0
+  ledger.continueAll = async () => {
+    pressed += 1
+    return { status: 'accepted', attempted: 1, continued: 1, remaining: 0, attention: 0, results: [] }
+  }
+  const state = await call('/dsh-pause-resume/state')
+  assert.equal(state.value.action, 'pause')
+  const answer = await call('/dsh-pause-resume/continue', { method: 'POST', headers: { host: '127.0.0.1:54601', 'x-dsh-pause-resume': '1' } })
+  assert.equal(answer.status, 409)
+  assert.equal(pressed, 0)
+})
+
+test('the continue press still needs the button header', async () => {
+  const { call, ledger } = await mount()
+  ledger.describe = () => ({ count: 1, attention: 0, busy: false, tasks: [] })
+  let pressed = 0
+  ledger.continueAll = async () => {
+    pressed += 1
+    return { status: 'accepted', attempted: 1, continued: 1, remaining: 0, attention: 0, results: [] }
+  }
+  const answer = await call('/dsh-pause-resume/continue', { method: 'POST', headers: { host: '127.0.0.1:54601' } })
+  assert.equal(answer.status, 403)
+  assert.equal(pressed, 0)
 })
