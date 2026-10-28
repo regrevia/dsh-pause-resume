@@ -1,20 +1,20 @@
 {
-  "generatedAt": "2026-10-28T05:40:22.645Z",
+  "generatedAt": "2026-10-28T05:54:48.325Z",
   "kind": "host-live",
   "plugin": {
     "name": "dsh-pause-resume",
-    "version": "0.6.4"
+    "version": "0.6.5"
   },
   "host": {
     "kind": "isolated-electron",
     "electron": "/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness",
     "cli": "/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js",
-    "dshHome": "/var/folders/jz/m25rbjt91gq8h84pjh6d4c9c0000gn/T/dsh-host-live-2d8wEI",
+    "dshHome": "/var/folders/jz/m25rbjt91gq8h84pjh6d4c9c0000gn/T/dsh-host-live-JFf0KF",
     "dshHomeRetained": false,
     "profile": "live",
     "baseProfile": "web",
     "note": "throwaway DSH_HOME and OS-assigned port; the real ~/.dsh profile is not read or written",
-    "port": "http://127.0.0.1:57243"
+    "port": "http://127.0.0.1:56498"
   },
   "mock": {
     "kind": "acceptance/mock-llm.mjs",
@@ -35,15 +35,15 @@
         "lastRole": "user",
         "lastText": "Generate the session title from this JSON array of human messages:\n[{\"seq\":8,\"text\":\"live turn for crash-turn-backfill\"}]",
         "held": false,
-        "finishedAt": "2026-10-28T05:40:24.095Z"
+        "finishedAt": "2026-10-28T05:54:49.784Z"
       },
       {
         "n": 3,
         "messages": 8,
         "lastRole": "user",
-        "lastText": "Time sampled while preparing turn 2, step 1: 2026-10-28T13:40:24+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
+        "lastText": "Time sampled while preparing turn 2, step 1: 2026-10-28T13:54:50+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
         "held": false,
-        "finishedAt": "2026-10-28T05:40:24.975Z"
+        "finishedAt": "2026-10-28T05:54:50.872Z"
       }
     ]
   },
@@ -54,7 +54,7 @@
   "steps": [
     {
       "step": "profile-created",
-      "at": "2026-10-28T05:40:22.755Z",
+      "at": "2026-10-28T05:54:48.434Z",
       "ok": true,
       "code": 0,
       "profile": "live",
@@ -63,7 +63,7 @@
     },
     {
       "step": "plugin-installed",
-      "at": "2026-10-28T05:40:23.132Z",
+      "at": "2026-10-28T05:54:48.814Z",
       "ok": true,
       "code": 0,
       "plugin": "/Users/apple/Desktop/DSH/dsh-pause-resume",
@@ -71,22 +71,22 @@
     },
     {
       "step": "model-overridden",
-      "at": "2026-10-28T05:40:23.136Z",
+      "at": "2026-10-28T05:54:48.818Z",
       "ok": true,
       "provider": "mock",
       "api": "openai-completions",
-      "baseURL": "http://127.0.0.1:57233/v1"
+      "baseURL": "http://127.0.0.1:56492/v1"
     },
     {
       "step": "host-ready",
-      "at": "2026-10-28T05:40:23.706Z",
+      "at": "2026-10-28T05:54:49.384Z",
       "ok": true,
-      "url": "http://127.0.0.1:57234",
+      "url": "http://127.0.0.1:56493",
       "boot": 1
     },
     {
       "step": "live-turn-running",
-      "at": "2026-10-28T05:40:23.861Z",
+      "at": "2026-10-28T05:54:49.691Z",
       "ok": true,
       "phase": "idle",
       "liveSessions": 1,
@@ -99,7 +99,7 @@
     },
     {
       "step": "paused-with-plan",
-      "at": "2026-10-28T05:40:23.942Z",
+      "at": "2026-10-28T05:54:49.771Z",
       "ok": true,
       "status": 200,
       "outcome": {
@@ -121,7 +121,7 @@
     },
     {
       "step": "crashed",
-      "at": "2026-10-28T05:40:23.950Z",
+      "at": "2026-10-28T05:54:49.783Z",
       "ok": true,
       "signal": "SIGKILL",
       "code": null,
@@ -129,14 +129,14 @@
     },
     {
       "step": "host-ready",
-      "at": "2026-10-28T05:40:24.534Z",
+      "at": "2026-10-28T05:54:50.431Z",
       "ok": true,
-      "url": "http://127.0.0.1:57243",
+      "url": "http://127.0.0.1:56498",
       "boot": 2
     },
     {
       "step": "plan-survived-crash",
-      "at": "2026-10-28T05:40:24.584Z",
+      "at": "2026-10-28T05:54:50.479Z",
       "ok": true,
       "phase": "paused",
       "outstanding": 1,
@@ -148,13 +148,13 @@
     },
     {
       "step": "resumed",
-      "at": "2026-10-28T05:40:24.661Z",
+      "at": "2026-10-28T05:54:50.555Z",
       "ok": true,
       "status": 200,
       "outcome": {
         "status": "resumed",
         "summary": {
-          "planId": "pause-mvror35i-1",
+          "planId": "pause-mvrp9n8c-1",
           "source": "pause",
           "restored": [
             "session spike-live-turn"
@@ -173,18 +173,18 @@
           ],
           "jobs": 0,
           "jobsStopped": [],
-          "at": "2026-10-28T05:40:24.584Z"
+          "at": "2026-10-28T05:54:50.481Z"
         }
       }
     },
     {
       "step": "continuation-request",
-      "at": "2026-10-28T05:40:25.118Z",
+      "at": "2026-10-28T05:54:51.014Z",
       "ok": true,
       "afterResume": {
         "n": 3,
         "messages": 8,
-        "lastText": "Time sampled while preparing turn 2, step 1: 2026-10-28T13:40:24+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
+        "lastText": "Time sampled while preparing turn 2, step 1: 2026-10-28T13:54:50+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
         "carriesTurnText": true
       },
       "beforeCrash": {
@@ -196,7 +196,7 @@
     },
     {
       "step": "exactly-once",
-      "at": "2026-10-28T05:40:28.118Z",
+      "at": "2026-10-28T05:54:54.016Z",
       "ok": true,
       "turnRequests": 2,
       "totalRequests": 3,
@@ -204,10 +204,10 @@
     },
     {
       "step": "restore-record",
-      "at": "2026-10-28T05:40:28.120Z",
+      "at": "2026-10-28T05:54:54.017Z",
       "ok": true,
       "files": [
-        "pause-mvror35i-1.json"
+        "pause-mvrp9n8c-1.json"
       ],
       "row": {
         "sessionId": "spike-live-turn",
@@ -227,7 +227,7 @@
     },
     {
       "step": "model-text-in-session",
-      "at": "2026-10-28T05:40:28.124Z",
+      "at": "2026-10-28T05:54:54.020Z",
       "ok": true,
       "sessionId": "spike-live-turn",
       "mockTextOccurrences": 2
@@ -270,7 +270,7 @@
     "resume": {
       "status": "resumed",
       "summary": {
-        "planId": "pause-mvror35i-1",
+        "planId": "pause-mvrp9n8c-1",
         "source": "pause",
         "restored": [
           "session spike-live-turn"
@@ -289,7 +289,7 @@
         ],
         "jobs": 0,
         "jobsStopped": [],
-        "at": "2026-10-28T05:40:24.584Z"
+        "at": "2026-10-28T05:54:50.481Z"
       }
     },
     "continuation": {
@@ -311,5 +311,5 @@
     "duplicateContinuation": false
   },
   "verdict": "pass",
-  "finishedAt": "2026-10-28T05:40:28.196Z"
+  "finishedAt": "2026-10-28T05:54:54.078Z"
 }

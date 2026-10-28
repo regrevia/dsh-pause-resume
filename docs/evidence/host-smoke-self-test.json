@@ -1,19 +1,19 @@
 {
-  "generatedAt": "2026-10-28T05:40:58.138Z",
+  "generatedAt": "2026-10-28T05:55:02.692Z",
   "plugin": {
     "name": "dsh-pause-resume",
-    "version": "0.6.4"
+    "version": "0.6.5"
   },
   "host": {
     "electron": "/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness",
     "cli": "/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js",
-    "dshHome": "/var/folders/jz/m25rbjt91gq8h84pjh6d4c9c0000gn/T/dsh-host-smoke-0uaE9T",
+    "dshHome": "/var/folders/jz/m25rbjt91gq8h84pjh6d4c9c0000gn/T/dsh-host-smoke-Y2zWFW",
     "profile": "smoke"
   },
   "steps": [
     {
       "step": "self-test-fail",
-      "at": "2026-10-28T05:40:58.138Z",
+      "at": "2026-10-28T05:55:02.693Z",
       "ok": false,
       "detail": "injected failure: this step must force a non-zero exit"
     }

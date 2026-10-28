@@ -1071,7 +1071,10 @@ test('a successful pause clears the previous restore report so its dot does not 
       attention: ['session s1: continuation admitted, no turn started'],
     },
   }
-  const probe = fakeProbe({ readable: true, sessions: [{ sessionId: 's1', running: true, lastTurn: 2 }], goals: [], jobs: [] }, { canceled: ['s1'] })
+  // A different session is running: a restore row about s1 still needs a look, so the dot stays
+  // until the pause clears the report. A row about a session that is itself running is resolved by
+  // live state instead (covered by the manual-continue test below).
+  const probe = fakeProbe({ readable: true, sessions: [{ sessionId: 's9', running: true, lastTurn: 2 }], goals: [], jobs: [] }, { canceled: ['s9'] })
   const { engine } = engineFor({ store, probe })
   await engine.hydrate()
   assert.equal(engine.describe().attention, 1)
@@ -1893,4 +1896,98 @@ test('a late readable row is still restored once, so retirement waits for real p
   assert.equal(second.status, 'resumed')
   assert.equal(store.state.pending, null)
   assert.equal(store.state.result.status, 'restored')
+})
+
+test('a manual continue during the press is progress, not a duplicate, and clears its own dot', async () => {
+  const live = { readable: true, sessions: [], goals: [], jobs: [] }
+  const probe = fakeProbe(live)
+  const running = new Set()
+  probe.restoreSession = async (session) => {
+    probe.calls.push(['session', session.sessionId])
+    if (running.has(session.sessionId)) return { status: 'restored', detail: 'already running', continued: true, turn: 8 }
+    return { status: 'unknown', detail: 'turn state unknown; open the session to decide' }
+  }
+  const plan = {
+    version: 3,
+    planId: 'crash-manual-1',
+    status: 'paused',
+    source: 'crash',
+    createdAt: '1970-01-01T00:00:00.000Z',
+    sessions: [
+      { sessionId: 's1', running: false, lastTurn: 3, intent: 'unknown', epoch: 0, crash: true },
+      { sessionId: 's2', running: false, lastTurn: 3, intent: 'unknown', epoch: 0, crash: true },
+      { sessionId: 's3', running: false, lastTurn: 3, intent: 'unknown', epoch: 0, crash: true },
+    ],
+    goals: [],
+    jobs: [],
+    attention: [],
+  }
+  const store = fakeStore()
+  store.state.pending = plan
+  const { engine } = engineFor({ store, probe })
+  // The person continued s2 by hand before this press. The press sends nothing for it, and the
+  // reduced unreadable set means real progress, so the plan stays open instead of retiring.
+  running.add('s2')
+  const first = await engine.resume()
+  assert.equal(first.status, 'partial')
+  assert.equal(store.state.pending.status, 'paused', 'a manual continue keeps the plan open')
+  assert.deepEqual(store.state.pending.restore.unknown.map((line) => /^session ([^:]+):/.exec(line)?.[1]), ['s1', 's3'])
+  // Now s3 is continued by hand as well; again one restored row, one unreadable row.
+  running.add('s3')
+  assert.equal((await engine.resume()).status, 'partial')
+  assert.equal(store.state.pending.restore.unknown.length, 1)
+  // Nothing changed since the last press: this is the honest end of what the button can do.
+  const retired = await engine.resume()
+  assert.equal(retired.status, 'partial')
+  assert.equal(store.state.plan, null)
+  assert.equal(store.state.pending, null)
+  const state = engine.describe()
+  assert.equal(state.action, 'none')
+  assert.equal(state.attention, 1)
+  assert.equal(state.focus, 's1', 'only the row still needing a look keeps the dot')
+  // s1 is continued by hand after the plan retired: its row stops needing a look.
+  running.add('s1')
+  live.sessions.push({ sessionId: 's1', running: true })
+  assert.equal(engine.describe().attention, 0)
+})
+
+test('a partial press replaces the captured crash count with only the rows still unresolved', async () => {
+  const live = { readable: true, sessions: [{ sessionId: 's2', running: true }], goals: [], jobs: [] }
+  const probe = fakeProbe(live)
+  probe.restoreSession = async (session) => {
+    probe.calls.push(['session', session.sessionId])
+    if (session.sessionId === 's2') return { status: 'restored', detail: 'already running', continued: true, turn: 8 }
+    return { status: 'unknown', detail: 'turn state unknown; open the session to decide' }
+  }
+  const plan = {
+    version: 3,
+    planId: 'crash-stale-1',
+    status: 'paused',
+    source: 'crash',
+    createdAt: '1970-01-01T00:00:00.000Z',
+    sessions: [
+      { sessionId: 's1', running: false, lastTurn: 3, intent: 'unknown', epoch: 0, crash: true },
+      { sessionId: 's2', running: false, lastTurn: 3, intent: 'unknown', epoch: 0, crash: true },
+      { sessionId: 's3', running: false, lastTurn: 3, intent: 'unknown', epoch: 0, crash: true },
+    ],
+    goals: [],
+    jobs: [],
+    attention: [{ kind: 'session', id: '', detail: 'crashed: 3 session(s) need a look before continuing' }],
+  }
+  const store = fakeStore()
+  store.state.pending = plan
+  const { engine } = engineFor({ store, probe })
+  assert.equal((await engine.resume()).status, 'partial')
+  const pending = store.state.pending
+  // The count cannot survive one of the rows being continued: it would keep claiming three.
+  assert.equal(pending.attention.some((row) => /^crashed: /.test(String(row.detail ?? ''))), false)
+  assert.deepEqual(pending.attention.map((row) => row.id), ['s1', 's3'])
+  assert.equal(engine.describe().attention, 2, 'the two rows the press could not settle need a look; the restored row does not')
+  assert.equal(engine.describe().focus, 's1')
+  // The person continues s1 by hand: its row clears without another press.
+  live.sessions.push({ sessionId: 's1', running: true })
+  assert.equal(engine.describe().attention, 1)
+  assert.equal(engine.describe().focus, 's3')
+  // describe() counts deduped rows, so s2's restored row never returns as attention.
+  assert.equal(probe.calls.filter((call) => call[0] === 'prompt').length, 0)
 })

@@ -154,12 +154,18 @@ machine; local-only is the default.
   operation that waits.
 * **Durable before destructive.** No turn is cancelled until the plan is on disk. A failed write means
   nothing was stopped.
-* **Bounded.** A restore that keeps failing closes after three attempts and reports those rows as
-  attention instead of staying paused indefinitely. An attempt that overruns its budget is watched a
-  little longer before it is called a failure, and a session this plan already restored stays
-  restored even if the Harness revives it and moves its turn on a later boot.
+* **Bounded.** A restore that keeps failing stays on disk with its rows named; it does not close as
+  if the work were finished. A row that cannot be read is retried once and then either reports real
+  progress or retires the plan as `partial` with per-row attention, so the button stops repeating a
+  no-op. Sessions continued by hand are restored, never re-sent, and their attention row clears as
+  soon as they run. An attempt that overruns its budget is watched a little longer before it is
+  called a failure, and a session this plan already restored stays restored even if the Harness
+  revives it and moves its turn on a later boot.
 * **Idempotent.** The continuation request id is derived from the plan and the session, so a retry
-  cannot post the same message twice; a turn that already moved is not continued again.
+  cannot post the same message twice; a turn that already moved is not continued again, and a turn
+  a person already continued is reported `already running` instead of being pressed again. The
+  Harness has no compare-and-admit, so a sub-second window remains between the last status read and
+  prompt admission; the guards narrow it and the outcome never claims atomicity.
 * **Honest.** Unreadable state never reports `paused`. A session deleted by hand, a goal changed by
   hand, a session already running: each is skipped and named in the outcome.
 * **No hidden takeover.** There is no public API to detach an agent, so the pause guarantee is
@@ -195,8 +201,8 @@ npm run smoke:live   # real Host + local mock model stream: pause, SIGKILL, rest
 npm run smoke:maintenance  # real Host: pause cancels an in-flight compaction, apart from the session turn
 ```
 
-Verification records live in `docs/acceptance-0.6.4.md` (current release, scenario matrix and what
-is still unverified), `docs/acceptance-0.6.0.md` (0.6.0–0.6.1) and `docs/evidence/`. The job-lifecycle listening design review, including why a job is
+Verification records live in `docs/acceptance-0.6.5.md` (current release: per-row isolation when a
+person already continued some sessions, the race window, and what is still unverified), `docs/acceptance-0.6.0.md` (0.6.0–0.6.1) and `docs/evidence/`. The job-lifecycle listening design review, including why a job is
 never restarted, is `docs/design/job-lifecycle.md`.
 
 `lib/engine.js` performs no I/O, `lib/snapshot.js` persists, `lib/probe.js` holds every Harness service

@@ -1,3 +1,11 @@
+## 0.6.5
+
+- A press no longer touches the sessions a person already continued by hand. A crash row that was recorded `unknown` but whose session now has a live running turn is reported `restored` / `already running` with no message sent, instead of `unknown` and an attention line; a `continue` row re-reads its agent immediately before admitting the prompt, so a manual continue that lands during the press is not sent a second continuation. Two sessions continued by hand plus three dead ones now means: nothing for the two, the three stay named.
+- Retirement measures progress against the previous press's unknown set instead of counting restored rows: a session continued by hand is restored on every press while it runs, and counting it as new progress kept the button promising a restore it could never finish. A manual continue still counts as progress (the plan stays open, the reduced set is what the next press compares against).
+- Attention became per-row. A partial press replaces the captured "N sessions need a look" count with one row per unresolved session, and a restore row leaves the dot the moment that session runs again — while a stop row ("would not stop") stays exactly because that work is still running.
+- Remaining race, stated plainly: the Harness offers no compare-and-admit for a continuation, so a window remains between the final status read and prompt admission. The request id derived from the plan and session, the admitted-request guard, the immediate re-read before admission and the post-admission turn proof narrow it; none of them makes it atomic.
+- `npm test`: 247 pass / 0 fail.
+
 ## 0.6.4
 
 - A press that can only ever repeat itself now ends. A crash plan whose rows all stay `unknown` used to keep the plan at `restore.attempts:0`, so every press re-read the same unreadable turns, reported `partial`, and left the button offering the identical restore forever. The first press still records the exact unknown set and keeps the plan, because a late settle or a fresh boot can make a row readable; the next press that finds the identical set and started nothing retires the plan as `partial`, publishes those rows as `attention` (the dot and "open the session to decide" stay), and the button goes back to `none`. Nothing is reported as restored, skipped or failed.

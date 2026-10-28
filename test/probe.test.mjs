@@ -271,6 +271,37 @@ test('restoreSession() keeps unknown state off the wire and out of terminal resu
   assert.equal(fake.calls.some((call) => call[0] === 'resolveAgent'), false)
 })
 
+test('an unknown row that a person continued by hand is reported running, not unreadable', async () => {
+  const agent = { id: 's1', status: 'running', phase: { lastTurn: 7 } }
+  const fake = harness({ agents: [agent] })
+  const probe = createProbe(fake.registry)
+  const outcome = await probe.restoreSession({ sessionId: 's1', intent: 'unknown', epoch: 0, running: false }, { plan: { planId: 'p1' } })
+  // The press must not touch a turn it did not start; calling it unreadable while it runs is wrong.
+  assert.deepEqual(outcome, { status: 'restored', detail: 'already running', continued: true, turn: 7, turnEnd: 'running' })
+  assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
+  assert.equal(agent.status, 'running')
+})
+
+test('a manual continue that lands while the press is assessing is not sent again', async () => {
+  const agent = { id: 's1', status: 'idle', phase: { lastTurn: 4 } }
+  let reads = 0
+  Object.defineProperty(agent, 'status', {
+    get() {
+      // The first read is the assessment's; from then on the turn is open, as if the person had
+      // pressed continue in the session a moment after the press started.
+      reads += 1
+      return reads > 1 ? 'running' : 'idle'
+    },
+    set() {},
+  })
+  const fake = harness({ agents: [agent] })
+  const probe = createProbe(fake.registry)
+  const outcome = await probe.restoreSession({ sessionId: 's1', intent: 'continue', epoch: 0, running: true, lastTurn: 4 }, { plan: { planId: 'pause-1' } })
+  assert.equal(outcome.continued, true)
+  assert.equal(outcome.detail, 'already running')
+  assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false, 'one obligation, one message')
+})
+
 test('restoreSession() stops before admitting when the restore was cancelled', async () => {
   const fake = harness({ agents: [{ id: 's1', status: 'idle', phase: { lastTurn: 4 } }] })
   const probe = createProbe(fake.registry)
