@@ -4,7 +4,7 @@
 
 ## 1. 现场
 
-- 崩溃：`~/Library/Logs/DeepSeek Harness/crash-2026-10-28T09-23-22-876Z-host.log`，`host exited with 1`，栈顶 `TypeError: this.holding is not a function`，来自另一个插件 `dsh-inner-browser-use/sidecar.js`（`file:///Users/apple/Desktop/DSH/dsh-inner-browser-use/sidecar.js?v=1:743:20`）。桌面端因此重启了 Host（`bootId` 90362），并留下了崩溃计划。
+- 崩溃：桌面端日志 `crash-2026-10-28T09-23-22-876Z-host.log`，`host exited with 1`，栈顶 `TypeError: this.holding is not a function`，来自另一个插件 `dsh-inner-browser-use` 的 `sidecar.js:743:20`（`this.holding is not a function`）。桌面端因此重启了 Host（`bootId` 90362），并留下了崩溃计划。
 - 插件状态 `/state`：`phase:"paused"`、`error:"restore-partial"`、`attention:14`、`outstanding:11`、`restore.active:false`，11 条 `result.unknown[]` 全是「turn state unknown; open the session to decide」。
 - 计划 `crash-1793110217612-12` 有 16 条 `intent:"unknown"` 行；人的每次按播放都只改了按钮相位，没有任何 `prompt` 被发出。
 
