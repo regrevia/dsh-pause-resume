@@ -52,7 +52,10 @@ function harness({ agents = [], goals = {}, jobs = {}, unownedJobs = [], kill = 
         const agent = live.get(request.sessionId)
         if (agent !== undefined) {
           agent.status = 'idle'
-          agent.phase.lastTurn = (agent.phase.lastTurn ?? 0) + 1
+          // The shipped cancel ends the phase it was called on; a maintenance compaction really
+          // does leave `phase.kind` behind, which is what a pause is allowed to call settled.
+          const lastTurn = (agent.phase?.lastTurn ?? 0) + 1
+          agent.phase = agent.phase?.kind === 'maintenance' ? { lastTurn } : { ...agent.phase, lastTurn }
         }
       },
       resolveAgent: async (sessionId) => {
@@ -636,4 +639,68 @@ test('the stale crash end is not reported as the admitted continuation ending in
   assert.doesNotMatch(String(outcome.detail), /continuation turn ended/)
   assert.notEqual(outcome.status, 'interrupted')
   assert.equal(outcome.continued, true)
+})
+
+test('an older completed end never settles a newer turn the plan still owes', async () => {
+  // Turn 1 completed, then the pause admitted turn 2 and the crash cut it. The only readable end is
+  // turn 1's completion; using it would skip the continuation turn 2 still owes.
+  const rig = turnRig({ lastTurn: 2 })
+  rig.fake.services.sessionLog = { readTurnEnds: () => [{ turn: 1, kind: 'completed' }] }
+  rig.fake.calls.length = 0
+  const probe = createProbe(rig.fake.registry, { settleMs: 60, watchTurn: rig.watchTurn })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 2 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'unknown')
+  assert.equal(outcome.end, 'completed')
+  assert.equal(outcome.continued, false)
+  assert.equal(rig.fake.calls.some((call) => call[0] === 'prompt'), false)
+})
+
+test('a blocked turn with no admission is continued, because the work never ran', async () => {
+  const rig = turnRig({ lastTurn: 7 })
+  rig.fake.services.sessionLog = { readTurnEnds: () => [{ turn: 7, kind: 'blocked' }] }
+  const prompt = rig.fake.services.sessionController.prompt
+  rig.fake.services.sessionController.prompt = async (request, signal) => {
+    const accepted = await prompt(request, signal)
+    // The shipped projection advances with the started turn; the fake has to publish that too or the
+    // probe would rightly refuse to call an invisible turn "continued".
+    rig.state.lastTurn = 8
+    return accepted
+  }
+  rig.fake.calls.length = 0
+  const probe = createProbe(rig.fake.registry, { settleMs: 60, watchTurn: rig.watchTurn })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 7 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.continued, true)
+  assert.equal(rig.fake.calls.filter((call) => call[0] === 'prompt').length, 1)
+})
+
+test('a continuation blocked after admission is attention, not another send', async () => {
+  // The opposite side of the pre-admission rule: once the continuation itself ran and ended
+  // `blocked`, the work was attempted. Sending it again would duplicate it; the row is a result for
+  // the person, not an obligation.
+  const rig = turnRig({ lastTurn: 7 })
+  const ends = [{ turn: 7, kind: 'blocked' }]
+  rig.fake.services.sessionLog = { readTurnEnds: () => ends.slice() }
+  const prompt = rig.fake.services.sessionController.prompt
+  rig.fake.services.sessionController.prompt = async (request, signal) => {
+    const accepted = await prompt(request, signal)
+    rig.state.lastTurn = 8
+    ends.push({ turn: 8, kind: 'blocked' })
+    return accepted
+  }
+  rig.fake.calls.length = 0
+  const probe = createProbe(rig.fake.registry, { settleMs: 60, watchTurn: rig.watchTurn })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 7 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'attention')
+  assert.equal(outcome.continued, true)
+  assert.match(String(outcome.detail), /blocked/)
+  assert.equal(rig.fake.calls.filter((call) => call[0] === 'prompt').length, 1)
 })

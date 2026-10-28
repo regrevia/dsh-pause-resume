@@ -1211,7 +1211,7 @@ test('a pending copy with work the snapshot does not cover is not deleted', asyn
   assert.notEqual(store.state.pending, null)
 })
 
-test('a goal already proven by its exact armed revision is re-armed without a new intent', async () => {
+test('a goal already proven by its exact armed revision still writes a pre-arm checkpoint', async () => {
   const plan = {
     version: 3, planId: 'pause-armed', status: 'paused', source: 'pause', sessions: [],
     goals: [{ sessionId: 's1', goalId: 'g1', revision: 3, armedRevision: 4, pendingRestore: null }], jobs: [], attention: [],
@@ -1219,7 +1219,7 @@ test('a goal already proven by its exact armed revision is re-armed without a ne
   const { probe, engine } = engineFor({ store: fakeStore({ plan }) })
   const outcome = await engine.resume()
   assert.equal(outcome.status, 'resumed')
-  assert.deepEqual(probe.calls.map((call) => call[0]), ['goal'])
+  assert.deepEqual(probe.calls.map((call) => call[0]), ['prepareGoal', 'goal'])
 })
 
 test('a post-stop write failure keeps the complete plan in memory for a resume', async () => {
@@ -1885,12 +1885,14 @@ test('a restore whose rows stay unreadable retires as partial instead of pressin
   const second = await engine.resume()
   assert.equal(second.status, 'partial')
   assert.equal(second.summary.attention.length, 1)
-  assert.equal(store.state.plan, null)
-  assert.equal(store.state.pending, null)
-  assert.equal(store.state.result.status, 'partial')
+  // No progress twice stops auto-retry, but it does not delete the only entry point left: the plan
+  // and its row stay readable so the person can still continue or inspect that session.
+  assert.notEqual(store.state.pending, null)
+  assert.equal(store.state.pending.status, 'partial')
+  assert.equal(store.state.pending.restore.unknownAttempts, 2)
   const state = engine.describe()
-  assert.equal(state.action, 'none')
-  assert.equal(state.phase, 'idle')
+  assert.equal(state.action, 'resume')
+  assert.equal(state.phase, 'paused')
   assert.equal(state.attention, 1)
 })
 
@@ -1962,13 +1964,15 @@ test('a manual continue during the press is progress, not a duplicate, and clear
   running.add('s3')
   assert.equal((await engine.resume()).status, 'partial')
   assert.equal(store.state.pending.restore.unknown.length, 1)
-  // Nothing changed since the last press: this is the honest end of what the button can do.
-  const retired = await engine.resume()
-  assert.equal(retired.status, 'partial')
-  assert.equal(store.state.plan, null)
-  assert.equal(store.state.pending, null)
+  // Nothing changed since the last press: this is where auto-retry stops. The plan is not consumed,
+  // so the row that still needs a look keeps its manual entry point.
+  const pressed = await engine.resume()
+  assert.equal(pressed.status, 'partial')
+  assert.notEqual(store.state.pending, null)
+  assert.equal(store.state.pending.status, 'partial')
   const state = engine.describe()
-  assert.equal(state.action, 'none')
+  assert.equal(state.action, 'resume')
+  assert.equal(state.phase, 'paused')
   assert.equal(state.attention, 1)
   assert.equal(state.focus, 's1', 'only the row still needing a look keeps the dot')
   // s1 is continued by hand after the plan retired: its row stops needing a look.

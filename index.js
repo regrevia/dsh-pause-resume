@@ -243,7 +243,16 @@ export function apply(ctx, config = {}) {
     }),
     // Persisted before the admitted continuation is waited on: a crash in that gap must not resend
     // the message, and must not lose it either.
-    onAdmitted: (sessionId, requestId) => engineRef?.recordAdmission(sessionId, requestId) !== false,
+    onAdmitted: (sessionId, requestId) => {
+      // From here on this session's turn belongs to the restore batch: its later model calls must
+      // stay inside the slot budget even if the first stream already ended.
+      try {
+        gate.track(sessionId)
+      } catch {
+        /* the gate may already be disposed */
+      }
+      return engineRef?.recordAdmission(sessionId, requestId) !== false
+    },
     graceMs: Number.isFinite(config?.graceMs) ? config.graceMs : 2000,
     continueText: typeof config?.continueText === 'string' ? config.continueText : undefined,
   })
@@ -279,10 +288,16 @@ export function apply(ctx, config = {}) {
   let disposed = false
   let disposeRoutes = () => {}
   let disposeStream = () => {}
+  let disposeTurns = () => {}
   const cleanup = () => {
     disposed = true
     try {
       disposeStream()
+    } catch {
+      /* the listener may already be gone */
+    }
+    try {
+      disposeTurns()
     } catch {
       /* the listener may already be gone */
     }
@@ -320,7 +335,7 @@ export function apply(ctx, config = {}) {
             purpose: options.purpose,
             provider: options.provider,
             model: options.model,
-          })
+          }, options.signal ?? null)
           let ended = false
           let healthy = false
           try {
@@ -341,6 +356,22 @@ export function apply(ctx, config = {}) {
         })()
       })
       if (typeof off === 'function') disposeStream = off
+      // The gate must outlive the streams of one restored turn. A turn makes one model call per
+      // step with tool calls in between, so "nothing is streaming" is not "the batch is done"; the
+      // turn edges are. Without this, a stream whose model call started a moment after the previous
+      // one ended walked straight past the limit.
+      if (typeof ctx.on === 'function') {
+        try {
+          const offTurn = ctx.on('session/event', (session, event) => {
+            if (gate.enabled() === false || typeof session?.id !== 'string') return
+            if (event?.type === 'turn/start') gate.turnOpen(session.id)
+            else if (event?.type === 'turn/end') gate.turnEnd(session.id)
+          })
+          if (typeof offTurn === 'function') disposeTurns = offTurn
+        } catch (error) {
+          log(`cannot watch restore turns: ${error?.message ?? error}`)
+        }
+      }
     } catch (error) {
       log(`cannot install the restore gate: ${error?.message ?? error}`)
     }

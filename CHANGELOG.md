@@ -1,3 +1,16 @@
+## 0.6.9
+
+- A completed turn from before the pause is no longer used to settle a newer turn the plan still owes. A stale `completed` end used to satisfy the turn check for any turn, which let the press skip the continuation turn 2 still owed; only an end at or after the owed turn can answer for it, and a newer owed turn with an older readable end is held as `unknown` instead of prompted.
+- A `blocked` turn is now split by admission. Before a continuation is admitted it is work that never ran, so the press continues it; after admission it is a real result and becomes one attention line instead of being sent again.
+- The restore gate now tracks turn ownership, not just the stream. A restored turn makes one model call per step with tool calls in between, so the gate used to close in the gap and a stream whose model call started a moment later walked past the slot limit. `session/event` opens and closes the turn, the drain waits for `openTurns === 0`, and the caller's abort signal reaches the permit wait.
+- A second press over the same unreadable set no longer consumes the plan. It keeps the plan on disk, counts `unknownAttempts`, rebuilds the attention rows from that press and returns `partial`, so the last manual entry point is still there after auto-retry stops.
+- Goal restore proof survives a pause that did not touch the goal. Clearing `pendingRestore` / `armedRevision` from untouched goal rows erased the only proof that the goal belonged to the plan; an already armed goal now also gets its own pre-arm checkpoint before a second re-arm.
+- A maintenance compaction is no longer reported paused before it stops writing. `cancel()` only asks; the press now waits up to 4 seconds for `phase.kind` to leave `maintenance`, and a compaction that stays there is an explicit `maintenance` error on the stop result, not a clean pause.
+- A background job handoff is per owner instead of requiring an otherwise empty plan, and its row is persisted before the continuation is delivered. A delivered handoff (`restored`) keeps the plan `partial` so the next boot can still read who was told what; only a later press that finds the turn already finished (`skipped`) spends the obligation, and deletion happens only after the completed plan is durable. A late `awaited:false` settle after a pause no longer wakes the owner.
+- A re-admission records its `.rN` attempt, so the next one gets a fresh request id; reusing `.r1` made the official prompt dedupe answer `accepted: true` without waking the session again.
+- A crash plan is classified against official turn ends before anybody presses continue, and a cold child mounts its parent once (bounded) before failing the row.
+- `npm test`: 265 pass / 0 fail. `npm run audit`: 0 errors. Mock acceptance: 7/7 and 5/5. Host smoke: 17/17.
+
 ## 0.6.8
 
 - Closing the restore gate no longer releases every parked model request at once. `unguard()` used to resolve the whole queue the moment a press returned, so a restore that parked five sessions behind a capacity of two turned them into five concurrent provider streams; the queue is now drained at the slot budget, and `abort()` closes a drained gate instead of parking the next request behind a finished batch.

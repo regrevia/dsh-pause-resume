@@ -163,3 +163,25 @@ test('a pause that empties a draining gate closes it instead of parking the next
   const after = await gate.acquire({ sessionId: 's3' })
   assert.deepEqual(after, { free: true }, 'a closed gate must not queue a request')
 })
+
+test('a tracked turn keeps a drained gate open so its second model call is still limited', async () => {
+  let current = 0
+  const gate = createGate({ capacity: 1, now: () => current })
+  gate.guard()
+  gate.track('s1')
+  gate.turnOpen('s1')
+  const first = await gate.acquire({ sessionId: 's1', purpose: 'turn' })
+  gate.release(first, 'ok')
+  // The turn is still running between its model calls. Ending the batch here closed the gate, and
+  // the next stream of that same turn then bypassed the limit entirely.
+  gate.unguard()
+  assert.equal(gate.stats().draining, true)
+  assert.equal(gate.stats().openTurns, 1)
+  assert.equal(gate.enabled(), true, 'the gate must stay armed while a restored turn is open')
+  const second = await gate.acquire({ sessionId: 's1', purpose: 'turn' })
+  assert.deepEqual(second, { free: false })
+  gate.release(second, 'ok')
+  gate.turnEnd('s1')
+  assert.equal(gate.enabled(), false, 'the last tracked turn closes the drained gate')
+  assert.equal(gate.stats().draining, false)
+})

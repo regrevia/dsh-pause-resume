@@ -347,6 +347,16 @@ test('an admission recorded during a restore is not lost when the restore ends p
   assert.equal(store.state.plan.sessions[0].admittedEpoch, 4)
 })
 
+test('a re-admission records its retry attempt so the next one gets a fresh request id', async () => {
+  const store = fakeStore({ plan: pausedPlan({ sessions: [{ sessionId: 's1', intent: 'continue', epoch: 2, retry: 0, lastTurn: 5 }] }) })
+  const { engine } = engineFor({ store, probe: probeFor() })
+  assert.equal(engine.recordAdmission('s1', 'crash-1:continue:s1:2.r1'), true)
+  assert.equal(store.state.plan.sessions[0].retry, 1)
+  assert.equal(engine.recordAdmission('s1', 'crash-1:continue:s1:2.r2'), true)
+  assert.equal(store.state.plan.sessions[0].retry, 2)
+  assert.equal(store.state.plan.sessions[0].admittedRequest, 'crash-1:continue:s1:2.r2')
+})
+
 // §2.6 — the resume may only claim a job stopped when the stop said so.
 test('resume copy follows the job stop state instead of assuming the command died', async () => {
   const store = fakeStore({ plan: pausedPlan({ jobs: [
@@ -378,6 +388,8 @@ test('a job-only plan hands the obligation to its owner instead of replaying the
   const result = await engine.resume()
 
   // The obligation is delivered through the ordinary session restore path, not reported and dropped.
+  // It stays `partial`: delivering the message is not proof the owner acted on it, and the plan is
+  // the only durable record of what they were told.
   assert.equal(result.status, 'partial')
   const sessionCall = probe.calls.find((call) => call[0] === 'session')
   assert.equal(sessionCall?.[1], 's9')
@@ -387,16 +399,12 @@ test('a job-only plan hands the obligation to its owner instead of replaying the
   assert.equal(probe.calls.some((call) => call[0] === 'goal' || call[0] === 'restoreGoal'), false)
   // The command is never replayed: the row continues the owner, it does not restart the job.
   assert.equal(Object.hasOwn(result.summary, 'jobsRestarted'), false)
-  // The plan stays on disk with the owner row, so a later boot still sees who owes the next step.
-  const plan = store.read()
-  assert.notEqual(plan, null)
-  assert.equal(plan.status, 'partial')
-  const row = plan.sessions.find((item) => item.sessionId === 's9')
-  assert.equal(row.intent, 'continue')
-  assert.equal(row.handoff, 'job')
-  assert.equal(row.job.id, 'j9')
-  assert.equal(row.job.command, 'npm run deploy')
-  assert.equal(row.job.lastOutput, '32%')
+  // The row is written to the store before delivery and stays there with the plan, so a concurrent
+  // reader and the next boot both see who still owes the next step.
+  assert.equal(store.state.consumed, null)
+  assert.equal(store.read()?.sessions.find((row) => row.sessionId === 's9')?.handoff, 'job')
+  assert.equal(store.state.result, null, 'a delivered handoff is not a finished restore')
+  assert.equal(result.summary.rows.find((row) => row.status === 'handoff')?.label, 'job j9')
 })
 
 test('the job handoff row reaches the store before its continuation is delivered', async () => {
@@ -417,9 +425,30 @@ test('the job handoff row reaches the store before its continuation is delivered
   const row = seenAtDelivery.sessions.find((item) => item.sessionId === 'owner')
   assert.equal(row?.handoff, 'job')
   assert.equal(row?.job?.id, 'j1')
-  // The owner was told in this cycle, so the obligation is still open and the plan is not consumed.
+  // The owner was told in this cycle, but `restored` is delivery, not acknowledgement: only the next
+  // press, which finds the turn completed and answers `skipped`, spends the obligation.
   assert.equal(store.state.consumed, null)
-  assert.equal(store.read().sessions.find((item) => item.sessionId === 'owner').handoff, 'job')
+  const kept = store.read()
+  assert.equal(kept.sessions.find((item) => item.sessionId === 'owner')?.handoff, 'job')
+  assert.equal(kept.status, 'partial')
+})
+
+test('a handoff the owner already read is spent by the next press, not delivered again', async () => {
+  const plan = pausedPlan({
+    status: 'partial',
+    sessions: [{ sessionId: 'owner', intent: 'continue', epoch: 1, running: false, lastTurn: null, handoff: 'job', job: { id: 'j1' } }],
+    jobs: [{ id: 'j1', owner: 'owner', status: 'running', stop: 'stopped' }],
+  })
+  const store = fakeStore({ plan })
+  const probe = probeFor({ restoreSession: async () => ({ status: 'skipped', detail: 'turn completed before this restart', continued: false }) })
+  const { engine } = engineFor({ store, probe })
+  const result = await engine.resume()
+  // `skipped` is proof the handoff turn already completed, so this is the press that ends the
+  // obligation; the owner is not told the same thing twice.
+  assert.equal(result.status, 'resumed')
+  assert.equal(store.read(), null)
+  assert.notEqual(store.state.consumed, null)
+  assert.equal(probe.calls.filter((call) => call[0] === 'session').length, 1)
 })
 
 
