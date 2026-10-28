@@ -252,6 +252,41 @@ test('a completed turn is never pressed twice even when the row carries a newer 
   assert.equal(rig.fake.calls.some((call) => call[0] === 'prompt'), false)
 })
 
+test('an unknown row continued by hand and finished becomes one attention line, not an endless unknown', async () => {
+  const rig = turnRig({ lastTurn: 7 })
+  rig.fake.services.sessionLog = { readTurnEnds: () => [{ turn: 7, kind: 'completed' }] }
+  rig.fake.calls.length = 0
+  const probe = createProbe(rig.fake.registry, { settleMs: 60, watchTurn: rig.watchTurn })
+  const outcome = await probe.restoreSession(
+    { sessionId: 's1', intent: 'unknown', epoch: 1, lastTurn: 6 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'attention')
+  assert.equal(outcome.continued, false)
+  assert.match(outcome.detail, /confirm the paused work was part of it/)
+  // No continuation may be sent: the row is terminal for this press, not a duplicate.
+  assert.equal(rig.fake.calls.some((call) => call[0] === 'prompt'), false)
+})
+
+test('the same unknown row resolves from the persisted log when no end service exists', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const sessionId = UUID()
+    await writeSessionLog(home, sessionId, [[turnEnd(7, 'interrupted')], [turnEnd(8, 'completed')]])
+    const fake = harness({ agents: [{ id: sessionId, status: 'idle', phase: { lastTurn: 8 }, session: { id: sessionId } }] })
+    const probe = createProbe(fake.registry, { dshHome: home, settleMs: 60 })
+    const outcome = await probe.restoreSession(
+      { sessionId, intent: 'unknown', epoch: 1, lastTurn: 6 },
+      { plan: { planId: 'p1' } },
+    )
+    assert.equal(outcome.status, 'attention')
+    assert.equal(outcome.turn, 8)
+    assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
 test('the turn listener is registered before the prompt is submitted', async () => {
   const rig = turnRig({ lastTurn: 6 })
   const probe = createProbe(rig.fake.registry, { settleMs: 60, watchTurn: rig.watchTurn })
@@ -296,6 +331,58 @@ test('restoreChild() skips a completed child turn instead of interrupting it aga
   )
   assert.equal(outcome.status, 'skipped')
   assert.equal(fake.calls.some((call) => call[0] === 'prompt'), false)
+})
+
+test('restoreChild() never resumes a child row whose turn ended before the restart', async () => {
+  const fake = harness({
+    agents: [
+      { id: 'p1', status: 'idle', phase: { lastTurn: 9 }, session: { id: 'p1' } },
+      { id: 'c1', status: 'idle', phase: { lastTurn: 5 }, session: { id: 'c1', header: { parentSession: 'p1' } } },
+    ],
+  })
+  // No end service and no log: without the intent check this row would be prompted on a guess.
+  const probe = createProbe(fake.registry, { settleMs: 60 })
+  const outcome = await probe.restoreSession(
+    { sessionId: 'c1', parent: 'p1', origin: 'subagent', intent: 'skip', epoch: 1, lastTurn: 5 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'skipped')
+  assert.equal(fake.calls.some((call) => call[0] === 'subagents.prompt'), false)
+})
+
+test('restoreChild() closes a hand-finished unknown child as attention, not a prompt', async () => {
+  const fake = harness({
+    agents: [
+      { id: 'p1', status: 'idle', phase: { lastTurn: 9 }, session: { id: 'p1' } },
+      { id: 'c1', status: 'idle', phase: { lastTurn: 5 }, session: { id: 'c1', header: { parentSession: 'p1' } } },
+    ],
+  })
+  fake.services.sessionLog = { readTurnEnds: () => [{ turn: 6, kind: 'completed' }] }
+  const probe = createProbe(fake.registry, { settleMs: 60 })
+  const outcome = await probe.restoreSession(
+    { sessionId: 'c1', parent: 'p1', origin: 'subagent', intent: 'unknown', epoch: 1, lastTurn: 5 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'attention')
+  assert.equal(outcome.turn, 6)
+  assert.equal(fake.calls.some((call) => call[0] === 'subagents.prompt'), false)
+})
+
+test('restoreChild() reports a child already running by hand as running, never as a prompt', async () => {
+  const fake = harness({
+    agents: [
+      { id: 'p1', status: 'idle', phase: { lastTurn: 9 }, session: { id: 'p1' } },
+      { id: 'c1', status: 'running', phase: { lastTurn: 6 }, session: { id: 'c1', header: { parentSession: 'p1' } } },
+    ],
+  })
+  const probe = createProbe(fake.registry, { settleMs: 60 })
+  const outcome = await probe.restoreSession(
+    { sessionId: 'c1', parent: 'p1', origin: 'subagent', intent: 'unknown', epoch: 1, lastTurn: 5 },
+    { plan: { planId: 'p1' } },
+  )
+  assert.equal(outcome.status, 'restored')
+  assert.equal(outcome.continued, true)
+  assert.equal(fake.calls.some((call) => call[0] === 'subagents.prompt'), false)
 })
 
 test('restoreChild() reports an already admitted continuation instead of sending it again', async () => {

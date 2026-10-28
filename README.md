@@ -201,8 +201,10 @@ npm run smoke:live   # real Host + local mock model stream: pause, SIGKILL, rest
 npm run smoke:maintenance  # real Host: pause cancels an in-flight compaction, apart from the session turn
 ```
 
-Verification records live in `docs/acceptance-0.6.5.md` (current release: per-row isolation when a
-person already continued some sessions, the race window, and what is still unverified), `docs/acceptance-0.6.0.md` (0.6.0–0.6.1) and `docs/evidence/`. The job-lifecycle listening design review, including why a job is
+Verification records live in `docs/acceptance-0.6.6.md` (current release: an `unknown` row a person
+continued by hand and finished, child rows honouring the same intents as roots, the race window, and
+what is still unverified), `docs/acceptance-0.6.5.md` (0.6.5), `docs/acceptance-0.6.0.md` (0.6.0–0.6.1)
+and `docs/evidence/`. The job-lifecycle listening design review, including why a job is
 never restarted, is `docs/design/job-lifecycle.md`.
 
 `lib/engine.js` performs no I/O, `lib/snapshot.js` persists, `lib/probe.js` holds every Harness service

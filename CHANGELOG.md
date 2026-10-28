@@ -1,3 +1,9 @@
+## 0.6.6
+
+- A crash row recorded `unknown` that a person continued by hand and let finish no longer stays `unknown` forever. The latest official turn end being `completed` is evidence that no turn is open, but not that the paused work was part of it, so that press now closes the row as one attention line ("a turn completed after the crash; confirm the paused work was part of it") and sends nothing. Where 0.6.5 kept reporting the row on every press until retirement, the evidence alone now settles it; a `completed` end read from the persisted session log works the same as one from the end service.
+- A child row now honours the same three intents a root row does. Before this, a child recorded `skip` could still be sent a queue continuation whenever no turn end was readable, and a child recorded `unknown` was prompted on the same guess; both now answer without a prompt (`skipped`, or the same attention line for a finished turn), and a child already running by hand is reported `restored` / `already running` instead of being queued a second continuation. Root and child behaviour were divergent; they are now one rule.
+- `npm test`: 252 pass / 0 fail.
+
 ## 0.6.5
 
 - A press no longer touches the sessions a person already continued by hand. A crash row that was recorded `unknown` but whose session now has a live running turn is reported `restored` / `already running` with no message sent, instead of `unknown` and an attention line; a `continue` row re-reads its agent immediately before admitting the prompt, so a manual continue that lands during the press is not sent a second continuation. Two sessions continued by hand plus three dead ones now means: nothing for the two, the three stay named.
