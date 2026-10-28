@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-10-28T15:46:26.899Z",
+  "generatedAt": "2026-10-28T15:51:32.887Z",
   "plugin": {
     "name": "dsh-pause-resume",
-    "version": "0.6.10"
+    "version": "0.6.11"
   },
   "host": {
     "electron": "/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness",
@@ -13,33 +13,33 @@
   "steps": [
     {
       "step": "create-profile",
-      "at": "2026-10-28T15:46:27.071Z",
+      "at": "2026-10-28T15:51:33.007Z",
       "ok": true,
       "code": 0,
       "stderr": ""
     },
     {
       "step": "install-plugin",
-      "at": "2026-10-28T15:46:27.487Z",
+      "at": "2026-10-28T15:51:33.398Z",
       "ok": true,
       "code": 0,
       "stderr": ""
     },
     {
       "step": "mount-entry",
-      "at": "2026-10-28T15:46:27.490Z",
+      "at": "2026-10-28T15:51:33.399Z",
       "ok": true,
       "patch": "- insert:\n    - id: dsh-pause-resume\n      name: 'dsh-pause-resume'"
     },
     {
       "step": "boot",
-      "at": "2026-10-28T15:46:28.132Z",
+      "at": "2026-10-28T15:51:33.952Z",
       "ok": true,
-      "url": "http://127.0.0.1:49653"
+      "url": "http://127.0.0.1:59420"
     },
     {
       "step": "state-after-boot",
-      "at": "2026-10-28T15:46:28.177Z",
+      "at": "2026-10-28T15:51:33.997Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -64,18 +64,18 @@
         "error": null,
         "result": null,
         "restore": null,
-        "version": "0.6.10"
+        "version": "0.6.11"
       }
     },
     {
       "step": "state-head",
-      "at": "2026-10-28T15:46:28.178Z",
+      "at": "2026-10-28T15:51:33.998Z",
       "ok": true,
       "status": 200
     },
     {
       "step": "state-without-guard-header",
-      "at": "2026-10-28T15:46:28.179Z",
+      "at": "2026-10-28T15:51:33.999Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -100,12 +100,12 @@
         "error": null,
         "result": null,
         "restore": null,
-        "version": "0.6.10"
+        "version": "0.6.11"
       }
     },
     {
       "step": "foreign-origin-rejected",
-      "at": "2026-10-28T15:46:28.179Z",
+      "at": "2026-10-28T15:51:33.999Z",
       "ok": true,
       "status": 403,
       "body": {
@@ -114,7 +114,7 @@
     },
     {
       "step": "foreign-host-rejected",
-      "at": "2026-10-28T15:46:28.181Z",
+      "at": "2026-10-28T15:51:34.001Z",
       "ok": true,
       "status": 403,
       "body": {
@@ -123,7 +123,7 @@
     },
     {
       "step": "continue-without-guard-header",
-      "at": "2026-10-28T15:46:28.181Z",
+      "at": "2026-10-28T15:51:34.001Z",
       "ok": true,
       "status": 403,
       "body": {
@@ -132,7 +132,7 @@
     },
     {
       "step": "continue-without-work",
-      "at": "2026-10-28T15:46:28.182Z",
+      "at": "2026-10-28T15:51:34.002Z",
       "ok": true,
       "status": 409,
       "body": {
@@ -157,7 +157,7 @@
         "error": null,
         "result": null,
         "restore": null,
-        "version": "0.6.10",
+        "version": "0.6.11",
         "outcome": {
           "status": "empty"
         }
@@ -165,7 +165,7 @@
     },
     {
       "step": "pause-idle",
-      "at": "2026-10-28T15:46:28.182Z",
+      "at": "2026-10-28T15:51:34.002Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -199,12 +199,12 @@
             "started": []
           }
         },
-        "version": "0.6.10"
+        "version": "0.6.11"
       }
     },
     {
       "step": "pause-idle-again",
-      "at": "2026-10-28T15:46:28.183Z",
+      "at": "2026-10-28T15:51:34.003Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -238,12 +238,12 @@
             "started": []
           }
         },
-        "version": "0.6.10"
+        "version": "0.6.11"
       }
     },
     {
       "step": "no-plan-created-by-idle-pause",
-      "at": "2026-10-28T15:46:28.183Z",
+      "at": "2026-10-28T15:51:34.003Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -268,12 +268,12 @@
         "error": null,
         "result": null,
         "restore": null,
-        "version": "0.6.10"
+        "version": "0.6.11"
       }
     },
     {
       "step": "state-dir",
-      "at": "2026-10-28T15:46:28.183Z",
+      "at": "2026-10-28T15:51:34.004Z",
       "ok": true,
       "files": [
         "running.json"
@@ -281,7 +281,7 @@
     },
     {
       "step": "state-after-restart",
-      "at": "2026-10-28T15:46:28.790Z",
+      "at": "2026-10-28T15:51:34.627Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -306,12 +306,12 @@
         "error": null,
         "result": null,
         "restore": null,
-        "version": "0.6.10"
+        "version": "0.6.11"
       }
     },
     {
       "step": "resume-without-plan",
-      "at": "2026-10-28T15:46:28.791Z",
+      "at": "2026-10-28T15:51:34.627Z",
       "ok": true,
       "status": 200,
       "body": {
@@ -339,12 +339,12 @@
         "outcome": {
           "status": "empty"
         },
-        "version": "0.6.10"
+        "version": "0.6.11"
       }
     },
     {
       "step": "plugin-ready-line",
-      "at": "2026-10-28T15:46:28.791Z",
+      "at": "2026-10-28T15:51:34.628Z",
       "ok": true,
       "lines": [
         "[dsh-pause-resume] ready (idle)",

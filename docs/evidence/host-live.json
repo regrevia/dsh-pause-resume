@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-10-28T15:47:05.835Z",
+  "generatedAt": "2026-10-28T15:51:34.707Z",
   "kind": "host-live",
   "plugin": {
     "name": "dsh-pause-resume",
-    "version": "0.6.10"
+    "version": "0.6.11"
   },
   "host": {
     "kind": "isolated-electron",
@@ -14,7 +14,7 @@
     "profile": "live",
     "baseProfile": "web",
     "note": "throwaway DSH_HOME and OS-assigned port; the real ~/.dsh profile is not read or written",
-    "port": "http://127.0.0.1:50552"
+    "port": "http://127.0.0.1:59441"
   },
   "mock": {
     "kind": "acceptance/mock-llm.mjs",
@@ -35,15 +35,15 @@
         "lastRole": "user",
         "lastText": "Generate the session title from this JSON array of human messages:\n[{\"seq\":8,\"text\":\"live turn for crash-turn-backfill\"}]",
         "held": false,
-        "finishedAt": "2026-10-28T15:47:07.315Z"
+        "finishedAt": "2026-10-28T15:51:36.087Z"
       },
       {
         "n": 3,
         "messages": 8,
         "lastRole": "user",
-        "lastText": "Time sampled while preparing turn 2, step 1: 2026-10-28T23:47:07+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
+        "lastText": "Time sampled while preparing turn 2, step 1: 2026-10-28T23:51:36+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
         "held": false,
-        "finishedAt": "2026-10-28T15:47:08.143Z"
+        "finishedAt": "2026-10-28T15:51:36.952Z"
       }
     ]
   },
@@ -54,7 +54,7 @@
   "steps": [
     {
       "step": "profile-created",
-      "at": "2026-10-28T15:47:05.951Z",
+      "at": "2026-10-28T15:51:34.808Z",
       "ok": true,
       "code": 0,
       "profile": "live",
@@ -63,7 +63,7 @@
     },
     {
       "step": "plugin-installed",
-      "at": "2026-10-28T15:47:06.338Z",
+      "at": "2026-10-28T15:51:35.160Z",
       "ok": true,
       "code": 0,
       "plugin": "<repo>",
@@ -71,22 +71,22 @@
     },
     {
       "step": "model-overridden",
-      "at": "2026-10-28T15:47:06.342Z",
+      "at": "2026-10-28T15:51:35.164Z",
       "ok": true,
       "provider": "mock",
       "api": "openai-completions",
-      "baseURL": "http://127.0.0.1:50534/v1"
+      "baseURL": "http://127.0.0.1:59432/v1"
     },
     {
       "step": "host-ready",
-      "at": "2026-10-28T15:47:06.935Z",
+      "at": "2026-10-28T15:51:35.714Z",
       "ok": true,
-      "url": "http://127.0.0.1:50535",
+      "url": "http://127.0.0.1:59433",
       "boot": 1
     },
     {
       "step": "live-turn-running",
-      "at": "2026-10-28T15:47:07.090Z",
+      "at": "2026-10-28T15:51:35.871Z",
       "ok": true,
       "phase": "idle",
       "liveSessions": 1,
@@ -99,7 +99,7 @@
     },
     {
       "step": "paused-with-plan",
-      "at": "2026-10-28T15:47:07.171Z",
+      "at": "2026-10-28T15:51:35.952Z",
       "ok": true,
       "status": 200,
       "outcome": {
@@ -126,7 +126,7 @@
     },
     {
       "step": "crashed",
-      "at": "2026-10-28T15:47:07.182Z",
+      "at": "2026-10-28T15:51:35.963Z",
       "ok": true,
       "signal": "SIGKILL",
       "code": null,
@@ -134,14 +134,14 @@
     },
     {
       "step": "host-ready",
-      "at": "2026-10-28T15:47:07.708Z",
+      "at": "2026-10-28T15:51:36.521Z",
       "ok": true,
-      "url": "http://127.0.0.1:50552",
+      "url": "http://127.0.0.1:59441",
       "boot": 2
     },
     {
       "step": "plan-survived-crash",
-      "at": "2026-10-28T15:47:07.752Z",
+      "at": "2026-10-28T15:51:36.563Z",
       "ok": true,
       "phase": "paused",
       "outstanding": 1,
@@ -153,13 +153,13 @@
     },
     {
       "step": "resumed",
-      "at": "2026-10-28T15:47:07.825Z",
+      "at": "2026-10-28T15:51:36.636Z",
       "ok": true,
       "status": 200,
       "outcome": {
         "status": "resumed",
         "summary": {
-          "planId": "pause-mvsafc2a-1",
+          "planId": "pause-mvsal3gg-1",
           "source": "pause",
           "restored": [
             "session spike-live-turn"
@@ -179,18 +179,18 @@
           ],
           "jobs": 0,
           "jobsStopped": [],
-          "at": "2026-10-28T15:47:07.752Z"
+          "at": "2026-10-28T15:51:36.564Z"
         }
       }
     },
     {
       "step": "continuation-request",
-      "at": "2026-10-28T15:47:08.283Z",
+      "at": "2026-10-28T15:51:37.092Z",
       "ok": true,
       "afterResume": {
         "n": 3,
         "messages": 8,
-        "lastText": "Time sampled while preparing turn 2, step 1: 2026-10-28T23:47:07+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
+        "lastText": "Time sampled while preparing turn 2, step 1: 2026-10-28T23:51:36+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
         "carriesTurnText": true
       },
       "beforeCrash": {
@@ -202,7 +202,7 @@
     },
     {
       "step": "exactly-once",
-      "at": "2026-10-28T15:47:11.284Z",
+      "at": "2026-10-28T15:51:40.094Z",
       "ok": true,
       "turnRequests": 2,
       "totalRequests": 3,
@@ -210,10 +210,10 @@
     },
     {
       "step": "restore-record",
-      "at": "2026-10-28T15:47:11.284Z",
+      "at": "2026-10-28T15:51:40.095Z",
       "ok": true,
       "files": [
-        "pause-mvsafc2a-1.json"
+        "pause-mvsal3gg-1.json"
       ],
       "row": {
         "sessionId": "spike-live-turn",
@@ -233,7 +233,7 @@
     },
     {
       "step": "model-text-in-session",
-      "at": "2026-10-28T15:47:11.286Z",
+      "at": "2026-10-28T15:51:40.097Z",
       "ok": true,
       "sessionId": "spike-live-turn",
       "mockTextOccurrences": 2
@@ -281,7 +281,7 @@
     "resume": {
       "status": "resumed",
       "summary": {
-        "planId": "pause-mvsafc2a-1",
+        "planId": "pause-mvsal3gg-1",
         "source": "pause",
         "restored": [
           "session spike-live-turn"
@@ -301,7 +301,7 @@
         ],
         "jobs": 0,
         "jobsStopped": [],
-        "at": "2026-10-28T15:47:07.752Z"
+        "at": "2026-10-28T15:51:36.564Z"
       }
     },
     "continuation": {
@@ -323,5 +323,5 @@
     "duplicateContinuation": false
   },
   "verdict": "pass",
-  "finishedAt": "2026-10-28T15:47:11.337Z"
+  "finishedAt": "2026-10-28T15:51:40.141Z"
 }
