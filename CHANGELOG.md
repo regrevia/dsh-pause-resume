@@ -1,3 +1,11 @@
+## 0.8.2
+
+- 「重启后又没能全部恢复」的根因修掉了：前一个进程挂过的行没有留下可验证的凭据，于是每次重启都**从第一份转录重新挂载一遍**，同一批大会话把堆吃满，后面的行又被预算拦下——看起来是恢复不动，实际是同一件事做第二遍。现在一行恢复成功就写下 `restoreDoneAt`/`restoreDoneBoot`；下一次启动读到早先进程留下的 `restored` 日志时，只要那一行是「只挂载」且没有记下任何 continuation，就直接采纳为已完成、不再反序列化它的转录。
+- 采纳有边界：日志里记了 continuation 轮次（`turn`）的行以及 `intent: continue` 的行仍然重新核对——记下的 turn 是随那个进程一起消失的提示，不能当已交付。本轮已恢复的行在同一个进程里的重复询问也一样：`continue` 行先读一次实时状态，确认那个 turn 已经结束才跳过。
+- 用户自己按停的 turn 不再被报成「需要确认」：`turn/end` 为 `aborted` 且原因是用户（`reason.kind === 'user'`）时按 `skipped` 收尾（暂停计划自己写的 aborted 仍归暂停所有）。这类行以前会停在 attention 里，让人以为还有活没放回去。
+- 跳过与采纳的说明都带原因（`restored before this restart`、`the turn was stopped by hand before this restore`），`/state` 与结果摘要里能分清「已做过」和「没做」。
+- 测试：单测 375 个（新增 3：早先进程挂过的行不再重复挂载、手停的 turn 记为 skipped、暂停计划仍拥有自己写的 aborted），`acceptance/run.mjs` 8/8、`acceptance/round2.mjs` 5/5。
+
 ## 0.8.1
 
 - 修一个会让「被拦下的工作」消失的缺陷：准入拦下整轮所有行时，这一轮仍走到计划消费那一步，把 `snapshot.json`/`pending.json` 里的计划删掉，于是下次启动看起来是干净恢复，实际那份大会话一次都没被打开过。现在只要有行被拦下，这一轮就以 `partial` 结束并保留计划：每行的 `deferred` 落盘、`intent` 不动、`/state.restore.deferred` 列出被拦下的行；重启后堆是空的，同一份计划自然能挂上。

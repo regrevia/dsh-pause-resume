@@ -348,3 +348,22 @@ test('a large goal waits for the turns this cycle opened, like any other large m
   assert.equal(plan.goals[0].pendingRestore, null)
   assert.equal(probe.calls.some(([kind]) => kind === 'goal'), false)
 })
+
+test('a session mounted by an earlier boot is not loaded again on the next one', async () => {
+  const MB = 1048576
+  const probe = pacingProbe({ weights: { done: 40 * MB, owed: 40 * MB } })
+  const store = fakeStore({ plan: planOf([{ sessionId: 'done', intent: 'mount' }, { sessionId: 'owed' }]) })
+  // The previous process mounted `done` and then died. Re-mounting it would deserialise the same
+  // transcript again and leave no room for the rows still owed: the journal is proof enough.
+  store.state.journal.set('s:done', { status: 'restored', boot: 'b0', epoch: 1, turn: null })
+  const engine = createEngine({
+    store, probe, bootId: 'b1', now: () => 1,
+    heapStats: () => ({ usedMB: 100, limitMB: 8192 }),
+    log: () => {},
+  })
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  const mounted = probe.calls.filter(([kind]) => kind === 'session').map(([, id]) => id)
+  assert.deepEqual(mounted, ['owed'], 'a mounted session must not be mounted twice across restarts')
+  assert.equal(store.state.result.status, 'restored', 'the adopted row still lets the plan finish')
+})

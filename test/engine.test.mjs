@@ -524,9 +524,10 @@ test('a crash in the middle of a restore keeps the plan and checks every item ag
   }
   const store = fakeStore({ plan: null })
   store.state.pending = pending
-  // The previous process restored s1 and then died. That row is finished work: it must not be
-  // probed again (a second continuation would duplicate it), while s2 has no evidence and is.
-  store.state.journal.set('s:s1', { status: 'restored', boot: 'b1' })
+  // The previous process mounted s1 and then died. That is finished work with no continuation
+  // behind it, so a restart adopts the proof instead of deserialising the same transcript again;
+  // s2 has no evidence at all and is mounted.
+  store.state.journal.set('s:s1', { status: 'restored', boot: 'b1', turn: null })
   let fail = true
   const probe = fakeProbe()
   probe.restoreSession = async (session) => {
@@ -540,15 +541,15 @@ test('a crash in the middle of a restore keeps the plan and checks every item ag
   assert.equal(partial.status, 'partial')
   assert.equal(store.state.pending.planId, 'crash-9-2')
   assert.equal(engine.describe().error, 'restore-partial')
-  // `s1` was journaled `restored` by a boot that no longer exists. That is not proof a turn is
-  // running now, so it is checked again under a fresh cycle instead of being trusted.
-  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => call[1]).sort(), ['s1', 's2'])
+  // `s1` is adopted from the earlier boot's journal: no echo, no second mount. `s2` fails once.
+  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => call[1]), ['s2'])
   assert.equal(store.state.journal.get('s:s1').status, 'restored')
+  assert.equal(store.state.journal.get('s:s1').boot, 'boot-1', 'the proof is re-journaled for this boot')
   fail = false
   const retry = await engine.resume()
   assert.equal(retry.status, 'resumed')
-  // Only the failure is retried; `s1` finished in this boot and gets no second continuation.
-  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => call[1]), ['s1', 's2', 's2'])
+  // Only the failure is retried; neither `s1` nor the adopted row is mounted again.
+  assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => call[1]), ['s2', 's2'])
   assert.equal(store.state.pending, null)
 })
 
@@ -1780,7 +1781,11 @@ test('a child whose parent is missing gets a mount-only parent row, then restore
   const outcome = await engine.resume()
   assert.equal(outcome.status, 'resumed')
   const synthesized = store.state.consumed.plan.sessions.find((row) => row.sessionId === 's1')
-  assert.deepEqual(synthesized, { sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null, parent: null, origin: 'root', crash: false })
+  const { restoreDoneAt, restoreDoneBoot, ...shape } = synthesized
+  assert.deepEqual(shape, { sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null, parent: null, origin: 'root', crash: false })
+  // The mount is proven for the next boot, so a restart does not deserialise this row again.
+  assert.equal(typeof restoreDoneAt, 'string')
+  assert.equal(restoreDoneBoot, 'boot-1')
   assert.deepEqual(probe.calls.filter((call) => call[0] === 'session').map((call) => [call[1], call[2]]), [['s1', false], ['s2', true]])
 })
 

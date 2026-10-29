@@ -186,6 +186,42 @@ test('assessSession() returns unknown, never skip, when no turn end is readable'
   }
 })
 
+test('a turn a person stopped by hand is skipped, not reported as unknown', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const sessionId = UUID()
+    // The end record a manual stop writes: `aborted` with the person named as its cause.
+    await writeSessionLog(home, sessionId, [[{ type: 'turn/end', data: { turn: 7, reason: { kind: 'aborted', reason: { kind: 'user' } } } }]])
+    const probe = createProbe(harness({}).registry, { dshHome: home, settleMs: 60 })
+    const session = { sessionId, intent: 'unknown', epoch: 1, lastTurn: 6 }
+    const verdict = await probe.assessSession(session, { plan: { planId: 'p1', source: 'crash' } })
+    assert.equal(verdict.action, 'skip')
+    assert.equal(verdict.end, 'aborted')
+    assert.match(verdict.detail, /stopped by hand/)
+    const outcome = await probe.restoreSession(session, { plan: { planId: 'p1', source: 'crash' } })
+    assert.equal(outcome.status, 'skipped')
+    assert.match(outcome.detail, /stopped by hand/)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('a pause plan still owns the aborted turn it wrote itself', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
+  try {
+    const sessionId = UUID()
+    await writeSessionLog(home, sessionId, [[{ type: 'turn/end', data: { turn: 7, reason: { kind: 'aborted', reason: { kind: 'user' } } } }]])
+    const probe = createProbe(harness({}).registry, { dshHome: home, settleMs: 60 })
+    const verdict = await probe.assessSession(
+      { sessionId, intent: 'continue', epoch: 1, lastTurn: 6 },
+      { plan: { planId: 'p1', source: 'pause' } },
+    )
+    assert.notEqual(verdict.action, 'skip', 'the press wrote that end; it must not retire the row')
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
 test('assessSession() reads an interrupted turn as owed work, not as completion', async () => {
   const home = await mkdtemp(join(tmpdir(), 'dsh-round2-'))
   try {
