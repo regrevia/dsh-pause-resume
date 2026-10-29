@@ -16,6 +16,7 @@ service pretending to be the Host.
 | `50282-mvspywon` | 2026-10-28T23:03Z | 30 | 16 | 13 | 1 |
 | `59524-mvsq3l9r` | 2026-10-28T23:10Z | 30 | 16 | 13 | 1 |
 | `79732-mvsuyb7m` | 2026-10-29T01:23Z | 30 | 16 | 13 | 1 |
+| `91126-mvsv8uat` | 2026-10-29T01:30Z | 30 | 16 | 13 | 1 |
 
 Every row above belongs to the same crash plan `crash-1793110217612-12` (`crashes: 12`), so the
 restores after `88580` replayed one old record instead of describing a new crash.
@@ -40,9 +41,9 @@ restores after `88580` replayed one old record instead of describing a new crash
    | `2683415a-12d1-433a-98b5-4c98d0b2c343` | 2026-10-28T22:38Z | `48728`, `50282`, `59524`, `79732` |
    | `355dbb86-d92d-45c3-a14e-73ae91d063bb` | 2026-10-28T21:28Z | `34072` … `79732` (ended in `attention`) |
 
-   `79732` had residue naming six sessions, yet the journal recorded sixteen `restored` rows: the
-   Host started restoring before that boot's `hydrate` ran, so the plan on disk was still the old
-   one at dispatch time.
+   `79732` had residue naming six sessions and `91126` naming ten, yet both journals recorded sixteen
+   `restored` rows: the Host started restoring before that boot's `hydrate` ran, so the plan on disk
+   was still the old one at dispatch time.
 
 ## What changed
 
@@ -71,3 +72,23 @@ finding above happens with it disabled.
 Journal `restored` still means "the Host accepted the continuation". Turning that into "a turn
 opened" needs a durable turn proof at journal time; the row baselines now make the churn visible but
 do not remove it.
+
+## Confirmation after the fix
+
+Boot `91126-mvsv8uat` (started 01:30:07Z, before the dispatch veto could read a residue) still
+journaled `restored:16`. The boot after it (01:45Z) is the first one carrying the working veto:
+
+- `/dsh-pause-resume/state`: `phase: idle`, `source: crash`, `restored: 0`, `skipped: 3`,
+  `failed: 0`; the skipped rows read `crashed outside a turn; not started`.
+- `pending.json` (01:46:08Z): 22 rows, **0 continuing, 15 mount-only** — the nine rows that were
+  still `continue` at 01:31 are now mount-only, so a later boot cannot open a turn for them.
+- No session file was touched for the three largest sessions in that window, which is what a mount
+  looks like and what the previous boots' `restored:16` did not look like.
+
+The same restart exposed one more thing worth writing down: the Host died at 01:29:47Z of a V8 heap
+OOM (3.9 GB of a 3.96 GB cap, stack entirely inside `app.asar/lib/main.js`), and the restart at
+01:30Z immediately restored sixteen sessions, three of which are the largest on disk (312 MB,
+238 MB and 204 MB of plain JSONL). Progressive restore is **off** on this machine, so the restore
+loop was free to mount up to four sessions at once (`Promise.all(Math.min(4, indexes.length))`).
+The fix does not remove that peak by itself — it removes the sixteen-session replay; capping
+concurrency is a separate, opt-in setting.
