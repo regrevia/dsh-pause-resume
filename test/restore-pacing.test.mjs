@@ -9,18 +9,21 @@ import { createEngine } from '../lib/engine.js'
  */
 
 function fakeStore({ plan = null } = {}) {
-  const state = { plan, writes: [], result: null, journal: new Map() }
+  const state = { plan, writes: [], result: null, journal: new Map(), pending: null }
+  // A crash-sourced plan is stored as pending work, so both write routes must behave like a disk:
+  // a fake that answers `null` to `writePending` makes every hold look like a failed write.
+  const write = (next) => {
+    state.writes.push(structuredClone(next))
+    state.plan = structuredClone(next)
+    return state.plan
+  }
   return {
     state,
     read: () => state.plan,
-    write: (next) => {
-      state.writes.push(structuredClone(next))
-      state.plan = structuredClone(next)
-      return state.plan
-    },
-    readPending: () => null,
-    writePending: () => null,
-    clearPending: () => true,
+    write,
+    readPending: () => state.pending,
+    writePending: (next) => { state.pending = write(next); return state.pending },
+    clearPending: () => { state.pending = null; return true },
     writeResult: (record) => {
       state.result = record
       return true
@@ -150,12 +153,63 @@ test('a large row is deferred instead of mounted when the host heap has no room 
   assert.equal(state.scheduling.deferred[0].reason.includes('heap'), true)
   assert.ok(state.scheduling.restartRecommended !== null, 'the page has to be able to say why the rest was held back')
   assert.equal(state.counts.sessions, 2, 'a deferred row is still owed work, not a failure')
-  // The hold is durable: the row is mount-only and names the reason, so the next press finds it.
+  // The hold is durable and keeps its intention: the row is still owed a continuation, it is not a
+  // mount-only row, and the next press reads `park` to know what it was about to do.
   for (const row of store.state.plan.sessions) {
-    assert.equal(row.intent, 'mount')
+    assert.equal(row.intent, 'continue', 'a hold must not rewrite what the row was going to do')
+    assert.equal(row.deferred.park, 'continue')
     assert.equal(row.running, false)
     assert.equal(typeof row.deferred.at, 'string')
   }
+})
+
+test('a held row comes back with the intention it was parked with', async () => {
+  const plan = planOf([{ sessionId: 'parked' }, { sessionId: 'legacy' }])
+  plan.sessions[0].deferred = { at: '2026-10-29T02:00:00.000Z', reason: 'host heap is near its limit', park: 'continue' }
+  plan.sessions[1].deferred = { at: '2026-10-29T02:00:00.000Z', reason: 'host heap is near its limit' }
+  const store = fakeStore({ plan })
+  const engine = createEngine({ store, probe: pacingProbe(), bootId: 'b2', now: () => 2, log: () => {} })
+  await engine.hydrate({ residue: { at: 1, sessions: [{ sessionId: 'parked' }, { sessionId: 'legacy' }] } })
+  const byId = new Map(store.state.plan.sessions.map((row) => [row.sessionId, row]))
+  // The continuation was held back, not abandoned: the next press must still send it.
+  assert.equal(byId.get('parked').intent, 'continue')
+  assert.equal(byId.get('parked').running, false)
+  assert.equal(byId.get('parked').deferred.park, 'continue')
+  // A hold written before `park` existed has nothing to restore, so it stays a plain mount.
+  assert.equal(byId.get('legacy').intent, 'mount')
+})
+
+test('a transcript whose size cannot be read is never admitted two at a time', async () => {
+  const probe = pacingProbe() // no weights: every session reads as unknown
+  const engine = createEngine({
+    store: fakeStore({ plan: planOf([{ sessionId: 'a' }, { sessionId: 'b' }]) }),
+    probe, bootId: 'b1', now: () => 1, log: () => {},
+  })
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  const order = probe.calls.filter(([kind]) => kind === 'session').map(([, id]) => id)
+  assert.deepEqual(order, ['a', 'b'], 'an unknown size is paced like a large one, never two at once')
+  assert.equal(engine.describe().scheduling.unknownWeights, 2, 'the page can say how many rows had no measurable size')
+})
+
+test('a transcript larger than the room left is held back before it is read', async () => {
+  const MB = 1048576
+  const probe = pacingProbe({ weights: { giant: 500 * MB } })
+  const engine = createEngine({
+    store: fakeStore({ plan: planOf([{ sessionId: 'giant' }]) }),
+    probe, bootId: 'b1', now: () => 1,
+    // Room at admission: 4000 - 500 used - 880 reserve = 2620 MB, while the transcript needs about
+    // 3000 MB of heap once parsed: the current reading is not the question, the upcoming bytes are.
+    heapStats: () => ({ usedMB: 500, limitMB: 4000 }),
+    log: () => {},
+  })
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed')
+  assert.equal(probe.calls.some(([kind]) => kind === 'session'), false, 'reading it is what would spend the room')
+  const held = engine.describe().scheduling.deferred
+  assert.equal(held.length, 1)
+  assert.equal(held[0].sessionId, 'giant')
+  assert.equal(held[0].reason.includes('may need'), true)
 })
 
 test('a row already held back is not promoted back to continue by the next boot', async () => {
@@ -214,4 +268,44 @@ test('the thresholds come from the heap this process has, not from one machine',
   assert.equal(pinned.reserveMB, 900)
   assert.equal(pinned.concurrency, 3)
   assert.deepEqual(pinned.derived, { heavyMB: false, reserveMB: false, concurrency: false })
+})
+
+function planWithGoal(sessions, goal) {
+  const plan = planOf(sessions)
+  plan.goals = [{ sessionId: goal.sessionId, goalId: 'g-1', revision: 4, armedRevision: null, pendingRestore: null }]
+  return plan
+}
+
+test('a goal is not armed when the heap is in the reserve: nothing is mounted, the row is kept', async () => {
+  const MB = 1048576
+  const probe = pacingProbe({ weights: { big: 40 * MB } })
+  const store = fakeStore({ plan: planWithGoal([], { sessionId: 'big' }) })
+  const engine = createEngine({
+    store, probe, bootId: 'b1', now: () => 1,
+    heapStats: () => ({ usedMB: 950, limitMB: 1000 }),
+    log: () => {},
+  })
+  await engine.resume()
+  const plan = store.state.plan
+  assert.equal(plan.goals[0].deferred.reason.startsWith('host heap is near its limit'), true)
+  assert.equal(plan.goals[0].pendingRestore, null, 'no intent for a revision this process never verified')
+  assert.equal(probe.calls.some(([kind]) => kind === 'goal'), false, 'prepareGoal never ran')
+  assert.equal(engine.describe().scheduling.restartRecommended.reason, 'host heap is near its limit')
+})
+
+test('a large goal waits for the turns this cycle opened, like any other large mount', async () => {
+  const MB = 1048576
+  const probe = pacingProbe({ weights: { h1: 40 * MB, h2: 40 * MB, h3: 40 * MB } })
+  const store = fakeStore({ plan: planWithGoal([{ sessionId: 'h1' }, { sessionId: 'h2' }], { sessionId: 'h3' }) })
+  const engine = createEngine({
+    store, probe, bootId: 'b1', now: () => 1,
+    restoreSettleMs: 0,
+    heapStats: () => ({ usedMB: 100, limitMB: 8192 }),
+    log: () => {},
+  })
+  await engine.resume()
+  const plan = store.state.plan
+  assert.equal(plan.goals[0].deferred.reason, 'an earlier restored session is still working')
+  assert.equal(plan.goals[0].pendingRestore, null)
+  assert.equal(probe.calls.some(([kind]) => kind === 'goal'), false)
 })

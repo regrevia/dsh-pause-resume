@@ -4,6 +4,7 @@
 // is written; the output says how many prompts the press would send and what each row would report.
 // Usage: node acceptance/replay-unknown.mjs [--home <DSH_HOME>] [--plan <pending.json>]
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createProbe } from '../lib/probe.js'
 
@@ -12,7 +13,7 @@ const arg = (name, fallback) => {
   const at = args.indexOf(name)
   return at === -1 ? fallback : args[at + 1]
 }
-const home = arg('--home', process.env.DSH_HOME ?? join(process.env.HOME ?? '', '.dsh'))
+const home = arg('--home', process.env.DSH_HOME ?? join(homedir(), '.dsh'))
 const planPath = arg('--plan', join(home, 'pause-resume', 'pending.json'))
 const plan = JSON.parse(readFileSync(planPath, 'utf8'))
 const rows = (Array.isArray(plan.sessions) ? plan.sessions : []).filter((row) => row.intent === 'unknown' && !row.parent)

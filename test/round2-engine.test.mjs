@@ -59,6 +59,8 @@ function probeFor({ stopOutcome = {}, restoreSession = null, assessSession = nul
   return {
     calls,
     live: () => liveState,
+    // Small measured transcripts keep the heap gate out of the way of the behaviour under test.
+    sessionWeight: async () => ({ bytes: 1024 * 1024, file: null }),
     stop: async (current) => {
       calls.push(['stop'])
       return { canceled: [], unknown: [], pausedGoals: [], goalErrors: [], killedJobs: [], jobErrors: [], stillRunning: [], ...stopOutcome }

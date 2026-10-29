@@ -56,12 +56,21 @@ test('a non-numeric timestamp is residue without a time', () => {
 })
 
 test('no residue from an absent, empty or unreadable file', () => {
-  for (const body of [null, '', '{', JSON.stringify({ version: 2, bootId: 'old', updatedAt: 1, sessions: [] })]) {
+  // Absence is a clean boot; a file that exists and cannot be parsed is a record lost, and the boot
+  // after it must be able to tell the two apart when it decides what its crash rows can prove.
+  const cases = [
+    [null, false],
+    [JSON.stringify({ version: 2, bootId: 'old', updatedAt: 1, sessions: [] }), false],
+    ['', true],
+    ['{', true],
+  ]
+  for (const [body, lost] of cases) {
     const root = dir()
     if (body !== null) writeFileSync(beatPath(root), body)
     const beat = createHeartbeat({ dir: root, bootId: 'new', listRunning: async () => [] })
     beat.start()
     assert.equal(beat.residue, null)
+    assert.equal(beat.residueUnreadable, lost)
     beat.stop()
   }
 })

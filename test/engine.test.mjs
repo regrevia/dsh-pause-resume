@@ -66,6 +66,9 @@ function fakeProbe(live = { sessions: [], goals: [], jobs: [], readable: true },
   return {
     calls,
     live: () => live,
+    // A measured, small transcript: only the pacing tests mean to exercise the unknown-weight path,
+    // and an unmeasurable row is deliberately treated as heavy, which would stall every resume here.
+    sessionWeight: async () => ({ bytes: 1024 * 1024, file: null }),
     stop: async (current) => {
       calls.push(['stop', current.sessions.length])
       return {

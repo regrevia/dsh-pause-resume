@@ -193,12 +193,23 @@ So a restore is paced by what it can afford to hold, not only by what it has to 
   is below `restoreHeapReserveMB`, the round mounts nothing further. A session that did not get its
   turn is recorded in `deferred` and left unstarted — loading its transcript is exactly the cost the
   gate exists to avoid — and the next press or the next boot picks it up.
+* **Predicted before mounted.** Admission also estimates the heap a transcript will take (six times
+  its compressed size) and holds the row back when the estimate does not fit the headroom that is
+  left, so a huge session is refused before it is read rather than after it has grown the heap. A
+  session whose size cannot be read is treated as heavy and goes through the serial heavy path;
+  `/state.scheduling.unknownWeights` reports how many this round could not measure.
 
 When a round restored a heavy session or produced `deferred`, `/state` also carries
 `restartRecommended` with the heap usage and the reason, and the client's tooltip says
 "跑完这些任务后重启宿主". The plugin never exits or restarts the Host itself: a process
 is a person's running work, and a plugin that killed it for a cleaner heap would be paying with
 data it does not own.
+
+The advice lives as long as the work it is about: it is kept while `/state.scheduling.deferred`
+lists rows that this round held back (the next press cannot mount them either), it is cleared by a
+healthy round with nothing deferred, and a recommendation from more than six hours ago is dropped
+unless rows are still waiting. A row that was held back keeps the intention it had (mount or
+continue) and comes back with it on the next restore.
 
 The three memory numbers are derived from the heap this Host actually has, not written down here:
 a 4 GB V8 cap and a 16 GB one cannot share a reserve, and a small cap wants one session at a time.

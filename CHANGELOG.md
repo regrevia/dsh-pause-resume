@@ -1,3 +1,13 @@
+## 0.8.0
+
+- 恢复准入多一道「预测成本」闸门：挂载一份转录的堆代价约等于它压缩体积的 6 倍（`EXPANSION`），准入时先按这个估算需要多少堆；放不下就在**读之前**拦下，不再出现「读完才把堆撑爆」。体积读不出来的会话一律按大会话处理（独占、串行），`/state.scheduling.unknownWeights` 报告本轮有几个测不出来。
+- 被拦下的行不再丢原意：`deferred.park` 记住它是「该挂载」还是「该继续」，下次恢复按原意回来；旧数据没有这个字段时仍按挂载处理。被拦下的行也不改写 `intent`，计划不关闭。
+- `/state.scheduling.deferred` 公开这些行（会话 id、原因、时间），页面用它解释按钮为什么恢复不了这一行；`restartRecommended` 与它们同寿命——`deferred` 非空就保留，健康且没有 deferred 的一轮清除，超过 6 小时的旧建议不再上报，时钟回拨不算过期。
+- 一处堆读数服务一个 `describe()`：`heap` 与 `heapLimitMB` 取自同一次 `getHeapStatistics()`；goal 与 session 走同一套预算与延迟逻辑；恢复被按下暂停时返回 `status: 'interrupted'`，不消费计划、不算一次失败、不显示成「上次操作没有完成」。
+- 崩溃记录存在却解析不出来时不再等同于干净启动：崩溃行只挂载不继续，`/state.error` 为 `residue`，日志写明原因。账本对「未来时间戳」的行不再隐藏，时钟回拨不会让行凭空消失。
+- 跨平台收口：`npm run audit` 改用 flat config（不再依赖引号转义）、`engines.node >= 22.15.0`、`npm test` 用 Node 自己展开的 glob；快照名撞上 Windows 保留设备名（`con`/`prn`/`aux`/`nul`/`com1-9`/`lpt1-9`）时加下划线；acceptance 用 `os.homedir()` 而不是拼 `~`；probe 侧修掉 BOM、`CRLF`、半截 JSONL 帧、单帧 64 MiB 上限、`session-` 前缀大小写、坏 id 与目录占位这些 Windows 上真实出现的形状。
+- 测试：单测 371 个（新增恢复节流 11、probe Windows 13、跨平台 12），`acceptance/run.mjs` 8/8、`acceptance/round2.mjs` 5/5。
+
 ## 0.7.1
 
 - 恢复节流的三个内存数字不再写死。0.7.0 把它们定成 12 MB / 700 MB / 2 并发，那只是本机 4 GB V8 上限下的合适值；换一台机器、或换一个 `--max-old-space-size`，同一个数字要么太松（堆先炸）要么太紧（该恢复的不恢复）。现在默认按进程实际的 `heap_size_limit` 推导：大会话阈值 `heapLimitMB / 340`（夹在 8–48 MB），堆余量 `22%`（夹在 320–1536 MB），并发在 V8 上限 < 3 GB 时退成 1。

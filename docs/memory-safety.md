@@ -79,6 +79,10 @@ FATAL ERROR: MarkCompactCollector: young object promotion failed
 * 计划不关闭，行上留 `deferred` 记录并进 `attention`，按钮继续给 ▶；下一次恢复会重新挂载它，是否有
   未完成的 turn 仍由它自己的实时 turn 判定，不靠这一行猜；
 * 不重发已经恢复过的会话，也不把 deferred 当成失败——它只是没做，不是做错了。
+* 同一批被拦下的行也列在 `/state.scheduling.deferred`（会话 id、原因、时间），页面用它说明按钮
+  为什么恢复不了这一行；被拦下的行记得自己的原意（`deferred.park`：挂载或继续），下次
+  恢复按原意回来，不会把「该继续的」降级成「只挂载」。
+* 尺寸读不出来的会话按大会话处理（独占、串行），`/state.scheduling.unknownWeights` 告诉你本轮有几个。
 
 **`restartRecommended`**：本轮的恢复含大会话，或产生了 `deferred` 时为真，同时带本轮堆用量与原因。
 它是一条建议，不是命令：
@@ -87,6 +91,11 @@ FATAL ERROR: MarkCompactCollector: young object promotion failed
 * 客户端据此显示「跑完这些任务后重启宿主」；
 * 堆已经涨上去的部分不会自己还回来：GC 只会回收不再引用的对象，transcript 仍然被活着的会话引用。
   重启是唯一可靠地把堆还给操作系统的办法。
+* 建议与它说的工作同寿命：`deferred` 非空时一直保留（下一次按压也挂不上它）；健康且没有
+  deferred 的一轮会清掉它；超过 6 小时的旧建议不再上报，时钟回拨不算过期。
+
+**读不出来的崩溃记录**：`running.json` 存在却解析失败时，本轮不当成干净启动：崩溃行只挂载、
+不继续，`/state.error` 为 `residue`，日志写明原因；不会出现「没有任何中断任务」这种与事实相反的状态。
 
 ## 4. 配置
 

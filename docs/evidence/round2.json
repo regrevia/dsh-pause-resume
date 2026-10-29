@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-29T03:32:22.927Z",
+  "generatedAt": "2026-10-29T04:33:50.300Z",
   "packageVersion": "0.7.1",
   "node": "v24.16.0",
   "contract": "docs/design/round2-contract.md §3",
@@ -38,7 +38,7 @@
       "id": "P1-2",
       "name": "completed turns are skipped and an already admitted continuation is not re-sent",
       "status": "pass",
-      "ms": 1356,
+      "ms": 1346,
       "detail": {
         "done": "skip",
         "admitted": "continue"
@@ -48,7 +48,7 @@
       "id": "P1-3",
       "name": "a cancel that fails during a restore leaves the plan partial",
       "status": "pass",
-      "ms": 692,
+      "ms": 684,
       "detail": {
         "status": "partial",
         "interrupted": true
@@ -58,7 +58,7 @@
       "id": "P1-4",
       "name": "hydrate keeps epoch, continuedTurn, admission record and goal revision",
       "status": "pass",
-      "ms": 8,
+      "ms": 11,
       "detail": {
         "row": {
           "epoch": 3,
@@ -71,7 +71,7 @@
       "id": "P1-5",
       "name": "a job-only plan hands the owner session back",
       "status": "pass",
-      "ms": 122,
+      "ms": 144,
       "detail": {
         "status": "partial",
         "owner": "owner"

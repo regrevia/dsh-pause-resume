@@ -23,6 +23,8 @@ function harness({ live = { readable: true, sessions: [], goals: [], jobs: [] },
   return {
     calls,
     live: () => live,
+    // Small measured transcripts keep the heap gate out of the way of the behaviour under test.
+    sessionWeight: async () => ({ bytes: 1024 * 1024, file: null }),
     stop: async (current) => {
       calls.push(['stop', current.sessions.map((row) => row.sessionId)])
       return {
