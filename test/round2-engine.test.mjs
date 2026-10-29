@@ -359,6 +359,36 @@ test('a boot without a heartbeat turns stale crash rows into mounts', async () =
   assert.equal(sessionCalls.some((call) => call[1] === 's1' && call[2] === 'continue'), false)
 })
 
+// Restoring a session deserialises its whole transcript, so the fan-out over one lineage level is a
+// memory guard: a restart that opens a paused set must not mount four transcripts at once.
+test('a restore never mounts more sessions at once than the memory ceiling allows', async () => {
+  const paused = pausedPlan({
+    sessions: Array.from({ length: 6 }, (_, index) => ({
+      sessionId: `s${index + 1}`,
+      intent: 'continue',
+      epoch: 1,
+      running: true,
+      lastTurn: 10 + index,
+    })),
+  })
+  let inFlight = 0
+  let peak = 0
+  const probe = probeFor({
+    restoreSession: async () => {
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      inFlight -= 1
+      return { status: 'restored', detail: 'attached' }
+    },
+  })
+  const store = fakeStore({ plan: paused })
+  const { engine } = engineFor({ store, probe })
+  await engine.hydrate({ residue: null })
+  await engine.resume()
+  assert.equal(peak <= 2, true, `peak concurrency was ${peak}`)
+})
+
 // A pause plan is what a person stopped by hand, so a boot without a heartbeat leaves it alone.
 test('a boot without a heartbeat leaves a pause plan continuable', async () => {
   const paused = pausedPlan({ sessions: [{ sessionId: 's1', intent: 'continue', epoch: 1, running: true, lastTurn: 4 }] })

@@ -387,6 +387,7 @@ export function apply(ctx, config = {}) {
     gate,
     progressive,
     startGapMs: progressive && Number.isFinite(config?.restoreStartGapMs) ? config.restoreStartGapMs : 3000,
+    restoreConcurrency: Number.isSafeInteger(config?.restoreConcurrency) && config.restoreConcurrency > 0 ? config.restoreConcurrency : 2,
     maxRestoreAttempts: Number.isSafeInteger(config?.restoreMaxAttempts) && config.restoreMaxAttempts > 0 ? config.restoreMaxAttempts : 3,
     log,
   })
