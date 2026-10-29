@@ -34,11 +34,11 @@ FATAL ERROR: MarkCompactCollector: young object promotion failed
 1. **只恢复本次崩溃确实中断的会话。** 历史会话、已完成的会话、正常结束的会话都不碰。这一条 0.6.x 已有，
    不是本轮新增；本轮新增的是下面三条。
 2. **逐步恢复，小的先走。** 会话按 transcript 体积从小到大排队，轻会话先恢复，大会话排在最后。
-   轻会话一轮最多 `restoreConcurrency`（默认 2）个同时进行。
-3. **大会话独占。** 体积 ≥ `restoreHeavyMB`（默认 12 MB 压缩转录）的会话进入独占段：一次只恢复一个，
+   轻会话一轮最多 `restoreConcurrency` 个同时进行（V8 上限 ≥ 3 GB 时 2，小内存机器 1）。
+3. **大会话独占。** 压缩转录体积 ≥ `restoreHeavyMB` 的会话进入独占段：一次只恢复一个，
    等它的 turn 结束，或等到 `restoreSettleMs`（默认 90 s）上限，再恢复下一个。
 4. **堆余量闸门。** 每步恢复前读 `v8.getHeapStatistics()`；剩余余量低于 `restoreHeapReserveMB`
-   （默认 700 MB）就不再挂载任何会话。没轮到的会话不加载转录（加载它正是闸门要避免的开销），
+   就不再挂载任何会话。没轮到的会话不加载转录（加载它正是闸门要避免的开销），
    只写入 `deferred` 记录，留给下次启动或手动恢复。
 
 ```
@@ -94,10 +94,14 @@ FATAL ERROR: MarkCompactCollector: young object promotion failed
 
 | 键 | 默认 | 作用 |
 | --- | --- | --- |
-| `restoreConcurrency` | `2` | 轻会话一轮内同时恢复的个数 |
-| `restoreHeavyMB` | `12` | 压缩转录到这个体积即算大会话，进入独占段 |
-| `restoreHeapReserveMB` | `700` | 堆余量低于它就停止本轮恢复 |
+| `restoreConcurrency` | V8 上限 ≥ 3 GB 为 `2`，否则 `1` | 轻会话一轮内同时恢复的个数 |
+| `restoreHeavyMB` | `heapLimitMB / 340`，夹在 8–48 MB | 压缩转录到这个体积即算大会话，进入独占段 |
+| `restoreHeapReserveMB` | V8 上限的 `22%`，夹在 320–1536 MB | 堆余量低于它就停止本轮恢复 |
 | `restoreSettleMs` | `90000` | 等大会话 turn 结束的上限 |
+
+三个内存数字都按**这台进程实际的 V8 上限**推导，不写死机器值：上限 4 GB 和 16 GB 不能用同一个余量，
+小内存机器还要退成一次一个。`/state.scheduling` 给出解析后的 `heavyMB`、`reserveMB`、`concurrency`，
+并用 `derived` 标明哪一项来自推导、哪一项来自配置——写死一个就当覆盖。
 
 它们与既有的渐进恢复不是同一层，可以同时开：
 

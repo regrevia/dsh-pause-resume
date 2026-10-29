@@ -186,3 +186,32 @@ test('a healthy heap does not hold anything back and reports no restart advice',
   assert.equal(engine.describe().scheduling.deferred.length, 0)
   assert.equal(engine.describe().scheduling.restartRecommended, null)
 })
+
+test('the thresholds come from the heap this process has, not from one machine', async () => {
+  const run = async (limitMB, overrides = {}) => {
+    const engine = createEngine({
+      store: fakeStore({ plan: planOf([{ sessionId: 's1' }]) }),
+      probe: pacingProbe(), bootId: 'b1', now: () => 1,
+      heapStats: () => ({ usedMB: 100, limitMB }),
+      ...overrides,
+      log: () => {},
+    })
+    await engine.resume()
+    return engine.describe().scheduling
+  }
+  const large = await run(8192)
+  assert.equal(large.heavyMB, 24, 'an 8 GB cap can carry a bigger transcript before it needs the process alone')
+  assert.equal(large.reserveMB, 1536)
+  assert.equal(large.concurrency, 2)
+  assert.deepEqual(large.derived, { heavyMB: true, reserveMB: true, concurrency: true })
+  const small = await run(2048)
+  assert.equal(small.heavyMB, 8)
+  assert.equal(small.reserveMB, 451)
+  assert.equal(small.concurrency, 1, 'a 2 GB cap restores one session at a time')
+  // An explicit config value is a person's decision and beats the derivation.
+  const pinned = await run(2048, { restoreHeavyMB: 5, restoreHeapReserveMB: 900, restoreConcurrency: 3 })
+  assert.equal(pinned.heavyMB, 5)
+  assert.equal(pinned.reserveMB, 900)
+  assert.equal(pinned.concurrency, 3)
+  assert.deepEqual(pinned.derived, { heavyMB: false, reserveMB: false, concurrency: false })
+})

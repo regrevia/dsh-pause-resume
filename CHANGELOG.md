@@ -1,3 +1,9 @@
+## 0.7.1
+
+- 恢复节流的三个内存数字不再写死。0.7.0 把它们定成 12 MB / 700 MB / 2 并发，那只是本机 4 GB V8 上限下的合适值；换一台机器、或换一个 `--max-old-space-size`，同一个数字要么太松（堆先炸）要么太紧（该恢复的不恢复）。现在默认按进程实际的 `heap_size_limit` 推导：大会话阈值 `heapLimitMB / 340`（夹在 8–48 MB），堆余量 `22%`（夹在 320–1536 MB），并发在 V8 上限 < 3 GB 时退成 1。
+- 配置仍然可以覆盖任何一项：写了就是人定的值，`/state.scheduling.derived` 会标明哪几项来自推导、哪几项来自配置；同时新增 `heapLimitMB` 与 `concurrency` 两个上报字段，`restoreHeapReserveMB` 的注释也不再声称默认 700。
+- 测试：单测 343 个（新增「阈值为 8 GB / 2 GB 上限分别推导，且显式配置覆盖推导」），`acceptance/run.mjs` 8/8、`acceptance/round2.mjs` 5/5。
+
 ## 0.7.0
 
 - 恢复改成按堆预算调度，这是本机 2026-10-29 连崩三次的直接修复。三次都是宿主 OOM：`crash-*-host.log` 里 pid 91126 跑满 64 分钟、堆 3.65 GB，pid 61989 在恢复 15 个会话后 15 分钟、堆 3.58 GB，都停在 `FATAL ERROR: MarkCompactCollector: young object promotion failed`。恢复一个会话要把它整段转录反序列化进同一个进程，大会话一条就是 GB 级，而 V8 上限约 4 GB——不是慢，是死。

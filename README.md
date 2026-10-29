@@ -186,13 +186,13 @@ So a restore is paced by what it can afford to hold, not only by what it has to 
   and sessions that ended normally are never touched. That is unchanged since 0.6.x.
 * **Smallest first.** The queue is ordered by transcript size, so light sessions go first and heavy
   ones last. Light sessions run `restoreConcurrency` (2) at a time.
-* **Heavy sessions run alone.** A session at or above `restoreHeavyMB` (12 MB of compressed
-  transcript) gets a step of its own; the next one starts when its turn ends, or after
-  `restoreSettleMs` (90 s) as the upper bound.
+* **Heavy sessions run alone.** A session whose compressed transcript is above `restoreHeavyMB`
+  gets a step of its own; the next one starts when its turn ends, or after `restoreSettleMs` (90 s)
+  as the upper bound.
 * **Heap gate.** Before each step the restore reads `v8.getHeapStatistics()`. If the headroom left
-  is below `restoreHeapReserveMB` (700 MB), the round mounts nothing further. A session that did not
-  get its turn is recorded in `deferred` and left unstarted — loading its transcript is exactly the
-  cost the gate exists to avoid — and the next press or the next boot picks it up.
+  is below `restoreHeapReserveMB`, the round mounts nothing further. A session that did not get its
+  turn is recorded in `deferred` and left unstarted — loading its transcript is exactly the cost the
+  gate exists to avoid — and the next press or the next boot picks it up.
 
 When a round restored a heavy session or produced `deferred`, `/state` also carries
 `restartRecommended` with the heap usage and the reason, and the client's tooltip says
@@ -200,14 +200,19 @@ When a round restored a heavy session or produced `deferred`, `/state` also carr
 is a person's running work, and a plugin that killed it for a cleaner heap would be paying with
 data it does not own.
 
-Configuration (all optional):
+The three memory numbers are derived from the heap this Host actually has, not written down here:
+a 4 GB V8 cap and a 16 GB one cannot share a reserve, and a small cap wants one session at a time.
+`/state.scheduling` reports the resolved values plus `derived`, which says which of them came from
+the heap instead of from config.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `restoreConcurrency` | `2` | light sessions restored at once in one round |
-| `restoreHeavyMB` | `12` | compressed-transcript size that makes a session heavy |
-| `restoreHeapReserveMB` | `700` | heap headroom below which a round stops |
+| `restoreConcurrency` | `1` if the V8 cap is under 3 GB, else `2` | light sessions restored at once in one round |
+| `restoreHeavyMB` | `heapLimitMB / 340`, clamped to 8–48 MB | compressed-transcript size that makes a session heavy |
+| `restoreHeapReserveMB` | `22%` of the V8 cap, clamped to 320–1536 MB | heap headroom below which a round mounts nothing |
 | `restoreSettleMs` | `90000` | upper bound to wait for a heavy session's turn |
+
+All four are optional; setting one pins that number and leaves the others derived.
 
 This is a different layer from progressive restore. `restoreProgressive`, `restoreCapacity`,
 `restoreMaxCapacity` and `restoreCooldownMs` limit real model requests to the upstream; these four
