@@ -17,6 +17,7 @@ window.__ModuleLoader__.load({
           cont: '继续未完成的任务', // ui-copy-ignore
           contCount: (n) => `${n} 个任务中断，点击继续`,
           contAttention: (n) => `${n} 个任务上次没有恢复`,
+          restart: '跑完这些任务后重启宿主', // ui-copy-ignore
         }
       : {
           pause: 'Pause', // ui-copy-ignore
@@ -29,6 +30,7 @@ window.__ModuleLoader__.load({
           cont: 'Continue unfinished work',
           contCount: (n) => `${n} ${n === 1 ? 'task stopped' : 'tasks stopped'}, press to continue`,
           contAttention: (n) => `${n} ${n === 1 ? 'task did' : 'tasks did'} not resume last time`,
+          restart: 'Restart the host when this work is done', // ui-copy-ignore
         }
 
     const HOST_BASE = '/dsh-pause-resume' // ui-copy-ignore
@@ -51,6 +53,7 @@ window.__ModuleLoader__.load({
       attention: 0,
       focus: null, // ui-copy-ignore
       error: null, // ui-copy-ignore
+      scheduling: null, // ui-copy-ignore
     }
 
     // A deadline must also release the request, not only stop waiting for it: a server that keeps
@@ -172,6 +175,11 @@ window.__ModuleLoader__.load({
       const focus = typeof state.focus === 'string' && state.focus !== '' ? state.focus : ''
       if (state.error === 'restore-partial') return focus === '' ? COPY.partial : `${COPY.partial}: ${focus}`
       if (state.error !== null && state.error !== undefined) return focus === '' ? COPY.error : `${COPY.error}: ${focus}`
+      // The one consequence the person has to act on: this process has already mounted everything it
+      // safely can, and the rest lands after a restart. It replaces a row's raw reason, which is a
+      // diagnostic and not something to put in front of a person.
+      const restart = state.scheduling?.restartRecommended
+      if (restart !== null && restart !== undefined && typeof restart.at === 'string') return COPY.restart
       if ((state.attention ?? 0) > 0) {
         return typeof state.focus === 'string' && state.focus !== '' ? `${COPY.attention}: ${state.focus}` : COPY.attention
       }

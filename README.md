@@ -171,6 +171,59 @@ pool, and no plugin can promise a concurrency limit for a company gateway it doe
 300 s upstream idle timeout is an upstream decision; progressive restore cannot pretend to fix it,
 but it makes the restore produce evidence (one session, one exact request) instead of an avalanche.
 
+## Restore pacing and heap headroom
+
+Restoring a session deserialises its whole transcript into the Host heap. One large session is
+GB-scale on its own, and the Host's V8 has roughly a 4 GB ceiling; past it the process does not
+throw, it dies with `FATAL ERROR: MarkCompactCollector: young object promotion failed`. Measured
+twice on 2026-10-29: pid 91126 after 64 minutes at 3.65 GB, and pid 61989 fifteen minutes after
+restoring 15 sessions at 3.58 GB. Both left `crash-*-host.log` under
+`~/Library/Logs/DeepSeek Harness/`.
+
+So a restore is paced by what it can afford to hold, not only by what it has to do:
+
+* **Only what this crash interrupted.** Sessions recorded by the crash plan are restored; history
+  and sessions that ended normally are never touched. That is unchanged since 0.6.x.
+* **Smallest first.** The queue is ordered by transcript size, so light sessions go first and heavy
+  ones last. Light sessions run `restoreConcurrency` (2) at a time.
+* **Heavy sessions run alone.** A session at or above `restoreHeavyMB` (12 MB of compressed
+  transcript) gets a step of its own; the next one starts when its turn ends, or after
+  `restoreSettleMs` (90 s) as the upper bound.
+* **Heap gate.** Before each step the restore reads `v8.getHeapStatistics()`. If the headroom left
+  is below `restoreHeapReserveMB` (700 MB), the round mounts nothing further. A session that did not
+  get its turn is recorded in `deferred` and left unstarted — loading its transcript is exactly the
+  cost the gate exists to avoid — and the next press or the next boot picks it up.
+
+When a round restored a heavy session or produced `deferred`, `/state` also carries
+`restartRecommended` with the heap usage and the reason, and the client's tooltip says
+"跑完这些任务后重启宿主". The plugin never exits or restarts the Host itself: a process
+is a person's running work, and a plugin that killed it for a cleaner heap would be paying with
+data it does not own.
+
+Configuration (all optional):
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `restoreConcurrency` | `2` | light sessions restored at once in one round |
+| `restoreHeavyMB` | `12` | compressed-transcript size that makes a session heavy |
+| `restoreHeapReserveMB` | `700` | heap headroom below which a round stops |
+| `restoreSettleMs` | `90000` | upper bound to wait for a heavy session's turn |
+
+This is a different layer from progressive restore. `restoreProgressive`, `restoreCapacity`,
+`restoreMaxCapacity` and `restoreCooldownMs` limit real model requests to the upstream; these four
+limit how much transcript a restore holds and how many sessions it steps through. Both can be on,
+and neither replaces the other. The crash evidence, the scheduling flow and the `deferred` /
+`restartRecommended` fields are described in `docs/memory-safety.md`.
+
+## Supported platforms
+
+macOS, Windows and Linux. State and logs go through `node:path` and `node:fs` only, under
+`$DSH_HOME` (or `~/.dsh` when the variable is unset); nothing calls a shell and nothing shells out
+to `stat`, `du` or `ps`. Cross-process exclusion uses a `session.lock` file rather than POSIX-only
+calls. On Windows the directory `fsync` has no equivalent, so it is skipped — a write is still a
+temp file plus `rename` — and that, together with line endings, is the only difference between the
+platforms.
+
 ## Installing
 
 ```bash
@@ -246,7 +299,9 @@ continued by hand and finished, child rows honouring the same intents as roots, 
 what is still unverified), `docs/acceptance-0.6.5.md` (0.6.5), `docs/acceptance-0.6.0.md` (0.6.0–0.6.1)
 and `docs/evidence/`. The eight-item mapping from the second review to code and proof is
 `docs/objective-round2-closure.md`. The job-lifecycle listening design review, including why a job is
-never restarted, is `docs/design/job-lifecycle.md`.
+never restarted, is `docs/design/job-lifecycle.md`. The memory-safety policy behind the 0.7.0 restore
+pacing — why a restore kills a Host, the crash evidence, the scheduling flow and the fields a person
+should look at — is `docs/memory-safety.md`.
 
 `lib/engine.js` performs no I/O, `lib/snapshot.js` persists, `lib/probe.js` holds every Harness service
 contract (agent identity, goal revision, per-owner jobs, continuation prompts), and `index.js` only

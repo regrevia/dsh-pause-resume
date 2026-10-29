@@ -1,3 +1,13 @@
+## 0.7.0
+
+- 恢复改成按堆预算调度，这是本机 2026-10-29 连崩三次的直接修复。三次都是宿主 OOM：`crash-*-host.log` 里 pid 91126 跑满 64 分钟、堆 3.65 GB，pid 61989 在恢复 15 个会话后 15 分钟、堆 3.58 GB，都停在 `FATAL ERROR: MarkCompactCollector: young object promotion failed`。恢复一个会话要把它整段转录反序列化进同一个进程，大会话一条就是 GB 级，而 V8 上限约 4 GB——不是慢，是死。
+- 四条调度规则，全部按堆算而不是按数量算：①只恢复本次崩溃真正中断的会话（0.6.12 起的行为不变）；②按压缩转录体积从小到大排队，轻会话仍走 `restoreConcurrency`（默认 2）；③体积 ≥ `restoreHeavyMB`（默认 12 MB）的会话独占一段：等它的 turn 结束，或等到 `restoreSettleMs`（默认 90 s）上限再放下一个；④每步之前读 `v8.getHeapStatistics()`，余量低于 `restoreHeapReserveMB`（默认 700 MB）就不再挂载任何会话。
+- 没轮到的会话不加载转录、写入 `deferred`（含时间与原因），计划不关闭、行仍可见并进 `attention`；一轮里有大会话或产生 `deferred` 时，计划与 `/state` 同时给出 `restartRecommended`（带本轮堆用量和原因）。插件从不退出或重启宿主：进程里是用户正在跑的 turn 和 job，插件无权替用户按那个键，只摆事实。
+- 客户端把 `restartRecommended` 翻成一句后果话「跑完这些任务后重启宿主」，替换掉原来的诊断性 reason，不新增任何常驻提示。
+- probe 新增 `sessionWeight(sessionId)`（复用 `findSessionLog` + `stat`，目录占位按 null 处理），供调度按体积排队；`describe()` 新增 `scheduling { heap, heavyMB, reserveMB, deferred, restartRecommended }`，超过 6 小时的旧建议不再上报。
+- 跨平台：README 新增 Supported platforms，并对持久状态层（`lib/ledger.js`、`lib/snapshot.js`、`lib/heartbeat.js`、`lib/store.js`）做了 POSIX 假设审计——路径只走 `node:path`、临时文件与目标同目录再 `rename`（Windows 上目标被占用时有限重试）、Windows 只跳过目录 `fsync`、JSONL 读侧容忍 `\r\n`、带 BOM 的状态文件仍可读。
+- 测试：单测 342 个（新增恢复节流 5 个、跨平台 5 个、probe 体积 6 个），`acceptance/run.mjs` 8/8、`acceptance/round2.mjs` 5/5。文档见 `docs/memory-safety.md`。
+
 ## 0.6.13
 
 - 恢复时的并发上限从 4 降到 2，并且不再依赖渐进恢复开关：恢复一个会话要把它整段记录反序列化，大会话一条就是一两个 GB 堆，四个同时开就是本机 3.9 GB 堆被打满的那次崩溃（宿主 01:29:47Z 的 OOM，栈全在 `app.asar`）。现在每一层波次最多同时挂载 2 个，需要更慢可以配 `restoreConcurrency: 1`。

@@ -388,6 +388,11 @@ export function apply(ctx, config = {}) {
     progressive,
     startGapMs: progressive && Number.isFinite(config?.restoreStartGapMs) ? config.restoreStartGapMs : 3000,
     restoreConcurrency: Number.isSafeInteger(config?.restoreConcurrency) && config.restoreConcurrency > 0 ? config.restoreConcurrency : 2,
+    // Memory safety for the restore pass: a transcript above `restoreHeavyMB` gets the process to
+    // itself, and no row is mounted once the V8 heap has less than `restoreHeapReserveMB` left.
+    restoreHeavyMB: Number.isFinite(config?.restoreHeavyMB) && config.restoreHeavyMB > 0 ? config.restoreHeavyMB : 12,
+    restoreHeapReserveMB: Number.isFinite(config?.restoreHeapReserveMB) && config.restoreHeapReserveMB > 0 ? config.restoreHeapReserveMB : 700,
+    restoreSettleMs: Number.isFinite(config?.restoreSettleMs) && config.restoreSettleMs >= 0 ? config.restoreSettleMs : 90000,
     maxRestoreAttempts: Number.isSafeInteger(config?.restoreMaxAttempts) && config.restoreMaxAttempts > 0 ? config.restoreMaxAttempts : 3,
     log,
   })
