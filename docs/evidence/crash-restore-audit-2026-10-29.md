@@ -92,3 +92,18 @@ OOM (3.9 GB of a 3.96 GB cap, stack entirely inside `app.asar/lib/main.js`), and
 loop was free to mount up to four sessions at once (`Promise.all(Math.min(4, indexes.length))`).
 The fix does not remove that peak by itself — it removes the sixteen-session replay; capping
 concurrency is a separate, opt-in setting.
+
+## The other half of that peak: fan-out
+
+`restored:16` was one amplifier of the 01:29:47Z OOM; the width of the restore loop was the other.
+Each lineage level was dispatched with a bounded fan-out of four, and mounting a session
+deserialises its whole transcript, so four large sessions could be materialised at once. `0.6.13`
+drops the ceiling to two and no longer ties it to progressive restore:
+
+```js
+restoreConcurrency = 2   // restored per level at a time; config can lower it to 1
+await Promise.all(Array.from({ length: Math.min(width, indexes.length) }, worker))
+```
+
+Regression: a plan with six same-level sessions records the real in-flight peak and asserts
+`peak <= 2` (326 tests, all passing).
