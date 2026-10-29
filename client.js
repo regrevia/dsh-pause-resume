@@ -18,6 +18,7 @@ window.__ModuleLoader__.load({
           contCount: (n) => `${n} 个任务中断，点击继续`,
           contAttention: (n) => `${n} 个任务上次没有恢复`,
           restart: '跑完这些任务后重启宿主', // ui-copy-ignore
+          restartHeld: '重启后继续没放下的内容', // ui-copy-ignore
         }
       : {
           pause: 'Pause', // ui-copy-ignore
@@ -31,6 +32,7 @@ window.__ModuleLoader__.load({
           contCount: (n) => `${n} ${n === 1 ? 'task stopped' : 'tasks stopped'}, press to continue`,
           contAttention: (n) => `${n} ${n === 1 ? 'task did' : 'tasks did'} not resume last time`,
           restart: 'Restart the host when this work is done', // ui-copy-ignore
+          restartHeld: 'Restart to continue what was held back', // ui-copy-ignore
         }
 
     const HOST_BASE = '/dsh-pause-resume' // ui-copy-ignore
@@ -173,6 +175,11 @@ window.__ModuleLoader__.load({
         return failed > 0 ? `${base} · ${COPY.contAttention(failed)}` : base
       }
       const focus = typeof state.focus === 'string' && state.focus !== '' ? state.focus : ''
+      // Rows this process held back are still owed work, and pressing again cannot mount them: the
+      // same heap is still there. "Press again" would be a loop, so the restart is the one next step.
+      const held = Array.isArray(state.scheduling?.deferred) ? state.scheduling.deferred.length : 0
+      const advice = state.scheduling?.restartRecommended
+      if (held > 0 && advice !== null && advice !== undefined && typeof advice.at === 'string') return COPY.restartHeld
       if (state.error === 'restore-partial') return focus === '' ? COPY.partial : `${COPY.partial}: ${focus}`
       if (state.error !== null && state.error !== undefined) return focus === '' ? COPY.error : `${COPY.error}: ${focus}`
       // The one consequence the person has to act on: this process has already mounted everything it

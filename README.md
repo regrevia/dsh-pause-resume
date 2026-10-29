@@ -199,9 +199,14 @@ So a restore is paced by what it can afford to hold, not only by what it has to 
   session whose size cannot be read is treated as heavy and goes through the serial heavy path;
   `/state.scheduling.unknownWeights` reports how many this round could not measure.
 
+A round that held rows back does not consume the plan: it ends `partial`, keeps every row on disk
+with its `deferred` note, and `/state.restore.deferred` lists what it could not mount. Consuming it
+would have deleted the only record of work that had never started, and the next boot would offer a
+clean restore while a large session was still owed.
+
 When a round restored a heavy session or produced `deferred`, `/state` also carries
-`restartRecommended` with the heap usage and the reason, and the client's tooltip says
-"跑完这些任务后重启宿主". The plugin never exits or restarts the Host itself: a process
+`restartRecommended` with the heap usage and the reason, and the client's tooltip switches to
+"重启后继续没放下的内容" once rows are waiting on a restart. The plugin never exits or restarts the Host itself: a process
 is a person's running work, and a plugin that killed it for a cleaner heap would be paying with
 data it does not own.
 

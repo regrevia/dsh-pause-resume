@@ -146,8 +146,12 @@ test('a large row is deferred instead of mounted when the host heap has no room 
     log: () => {},
   })
   const outcome = await engine.resume()
-  assert.equal(outcome.status, 'resumed')
+  assert.equal(outcome.status, 'partial', 'a press that mounted nothing did not finish the work')
   assert.equal(probe.calls.some(([kind]) => kind === 'session'), false, 'nothing is mounted into a heap that is already full')
+  assert.notEqual(store.state.plan, null, 'held-back work must survive the press that could not mount it')
+  assert.equal(store.state.plan.status, 'partial')
+  assert.deepEqual(store.state.plan.restore.deferred.map((row) => row.sessionId), ['big', 'small'])
+  assert.equal(store.state.result, null, 'the plan is not consumed while a row is still owed')
   const state = engine.describe()
   assert.equal(state.scheduling.deferred.length, 2)
   assert.equal(state.scheduling.deferred[0].reason.includes('heap'), true)
@@ -195,8 +199,9 @@ test('a transcript whose size cannot be read is never admitted two at a time', a
 test('a transcript larger than the room left is held back before it is read', async () => {
   const MB = 1048576
   const probe = pacingProbe({ weights: { giant: 500 * MB } })
+  const store = fakeStore({ plan: planOf([{ sessionId: 'giant' }]) })
   const engine = createEngine({
-    store: fakeStore({ plan: planOf([{ sessionId: 'giant' }]) }),
+    store,
     probe, bootId: 'b1', now: () => 1,
     // Room at admission: 4000 - 500 used - 880 reserve = 2620 MB, while the transcript needs about
     // 3000 MB of heap once parsed: the current reading is not the question, the upcoming bytes are.
@@ -204,8 +209,13 @@ test('a transcript larger than the room left is held back before it is read', as
     log: () => {},
   })
   const outcome = await engine.resume()
-  assert.equal(outcome.status, 'resumed')
+  assert.equal(outcome.status, 'partial')
   assert.equal(probe.calls.some(([kind]) => kind === 'session'), false, 'reading it is what would spend the room')
+  // A plan consumed here forgot the row entirely: the next boot offered a clean restore while the
+  // session had never been opened. The hold has to outlive the press that made it.
+  assert.notEqual(store.state.plan, null)
+  assert.equal(store.state.plan.sessions[0].deferred.park, store.state.plan.sessions[0].intent, 'the hold keeps what the row meant to do')
+  assert.deepEqual(store.state.plan.restore.deferred.map((row) => row.sessionId), ['giant'])
   const held = engine.describe().scheduling.deferred
   assert.equal(held.length, 1)
   assert.equal(held[0].sessionId, 'giant')
