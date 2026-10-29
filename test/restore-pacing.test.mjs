@@ -183,6 +183,35 @@ test('a held row comes back with the intention it was parked with', async () => 
   assert.equal(byId.get('legacy').intent, 'mount')
 })
 
+test('a held row is mounted by the next process, and only then is the plan spent', async () => {
+  const store = fakeStore({ plan: planOf([{ sessionId: 'late' }]) })
+  const probe = pacingProbe({ weights: { late: 1024 * 1024 } })
+  const tight = createEngine({
+    store, probe, bootId: 'b1', now: () => 1,
+    heapStats: () => ({ usedMB: 3500, limitMB: 4000 }),
+    log: () => {},
+  })
+  const first = await tight.resume()
+  assert.equal(first.status, 'partial')
+  assert.notEqual(store.state.plan, null, 'the press that could not mount anything leaves the plan on disk')
+  assert.equal(store.state.result, null)
+
+  // A later process starts with almost no heap in use: the same row, same plan, nothing mounted.
+  const nextProbe = pacingProbe({ weights: { late: 1024 * 1024 } })
+  const next = createEngine({
+    store, probe: nextProbe, bootId: 'b2', now: () => 2,
+    heapStats: () => ({ usedMB: 100, limitMB: 4000 }),
+    log: () => {},
+  })
+  const second = await next.resume()
+  assert.equal(second.status, 'resumed', 'once there is room the held row is the work of the next press')
+  assert.equal(nextProbe.calls.some(([kind, id]) => kind === 'session' && id === 'late'), true)
+  assert.notEqual(store.state.result, null, 'the plan is spent only after the work it named was mounted')
+  // A crash-sourced plan lives in pending.json, so spending it writes the result and clears that
+  // file; the snapshot fixture is not the durable copy in this case.
+  assert.equal(store.state.pending, null)
+})
+
 test('a transcript whose size cannot be read is never admitted two at a time', async () => {
   const probe = pacingProbe() // no weights: every session reads as unknown
   const engine = createEngine({
