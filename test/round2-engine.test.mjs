@@ -101,10 +101,10 @@ function probeFor({ stopOutcome = {}, restoreSession = null, assessSession = nul
   }
 }
 
-function engineFor({ store = null, probe = null, bootId = 'boot-1', maxRestoreAttempts } = {}) {
+function engineFor({ store = null, probe = null, bootId = 'boot-1', maxRestoreAttempts, heartbeat = null } = {}) {
   const s = store ?? fakeStore()
   const p = probe ?? probeFor()
-  const engine = createEngine({ store: s, probe: p, heartbeat: null, now: () => 1700000000000, bootId, maxRestoreAttempts, log: () => {} })
+  const engine = createEngine({ store: s, probe: p, heartbeat, now: () => 1700000000000, bootId, maxRestoreAttempts, log: () => {} })
   return { store: s, probe: p, engine }
 }
 
@@ -257,12 +257,15 @@ test('hydrate keeps the pause plan intact and only marks rows the residue did no
   assert.deepEqual(written.goals.find((row) => row.goalId === 'g1').pendingRestore, { revision: 8, expect: 9, at: 'x' })
 
   // A heartbeat that names nothing is not a census: nothing is deleted, it is marked unseen.
+  // A pause plan keeps `continue` here on purpose: its rows were stopped by the press itself, so a
+  // later press still owes them a continuation. Only a crash plan treats "not named" as "was idle".
   const unseenResidue = { at: 1700000000000, sessions: [] }
   const second = await engine.hydrate({ residue: unseenResidue })
   assert.equal(second.durable, true)
   const afterSecond = store.read()
   assert.equal(afterSecond.sessions.length, 2)
   assert.equal(afterSecond.sessions.every((row) => row.unseen === true), true)
+  assert.equal(afterSecond.sessions.find((row) => row.sessionId === 's1').intent, 'continue')
   assert.equal(afterSecond.goals.length, 1)
   assert.equal(afterSecond.goals[0].unseen, true)
 
@@ -270,6 +273,126 @@ test('hydrate keeps the pause plan intact and only marks rows the residue did no
   const before = readFileSync(join(dir, 'snapshot.json'), 'utf8')
   await engine.hydrate({ residue: unseenResidue })
   assert.equal(readFileSync(join(dir, 'snapshot.json'), 'utf8'), before)
+})
+
+// Regression: a crash plan written for boot N must not queue continuations for rows boot N+1's
+// residue does not name. That replay is how a two-day-old session got a fresh turn on every boot,
+// while the person only asked to restore the crash that had just happened.
+test('a previous crash plan leaves rows the new residue does not name mount-only', async () => {
+  const oldPlan = {
+    version: 3,
+    planId: 'crash-old-1',
+    status: 'paused',
+    source: 'crash',
+    createdAt: '2023-11-14T22:13:20.000Z',
+    sessions: [
+      { sessionId: 's1', intent: 'continue', epoch: 2, running: true, lastTurn: 22, continuedTurn: 22, crash: true, unseen: true },
+      { sessionId: 's2', intent: 'continue', epoch: 0, running: true, lastTurn: 45, continuedTurn: 45, crash: true, unseen: true },
+    ],
+    goals: [],
+    jobs: [],
+    attention: [],
+    crashes: 2,
+  }
+  const store = fakeStore({ plan: oldPlan })
+  // The new residue only names s3: s1/s2 were not running when this process died.
+  const residue = { at: 1700000500000, sessions: [{ sessionId: 's3', lastTurn: 1 }] }
+  const { engine, probe } = engineFor({ store })
+
+  const hydrated = await engine.hydrate({ residue })
+  assert.equal(hydrated.durable, true)
+  const after = store.read()
+  const s1 = after.sessions.find((row) => row.sessionId === 's1')
+  const s2 = after.sessions.find((row) => row.sessionId === 's2')
+  for (const row of [s1, s2]) {
+    assert.equal(row.intent, 'mount')
+    assert.equal(row.running, false)
+    assert.equal(row.epoch, 0)
+    assert.equal(row.unseen, true)
+    assert.equal(row.continuedTurn, row.lastTurn)
+  }
+
+  probe.calls.length = 0
+  await engine.resume()
+  const restoredRows = probe.calls.filter((call) => call[0] === 'session')
+  for (const call of restoredRows) {
+    if (call[1] === 's1' || call[1] === 's2') assert.equal(call[2], 'mount')
+  }
+  assert.equal(restoredRows.some((call) => call[1] === 's1' && call[2] === 'continue'), false)
+  assert.equal(restoredRows.some((call) => call[1] === 's2' && call[2] === 'continue'), false)
+})
+
+// §2.4 — a boot that found no heartbeat at all cannot prove any old crash row was mid-turn, so the
+// plan keeps its rows as mounts instead of replaying every continuation once more.
+test('a boot without a heartbeat turns stale crash rows into mounts', async () => {
+  const oldPlan = {
+    version: 3,
+    planId: 'crash-stale-1',
+    status: 'paused',
+    source: 'crash',
+    createdAt: '2023-11-14T22:13:20.000Z',
+    sessions: [
+      { sessionId: 's1', intent: 'continue', epoch: 3, running: true, lastTurn: 85, continuedTurn: 85, crash: true, unseen: true },
+      { sessionId: 's2', intent: 'mount', epoch: 2, running: false, lastTurn: 17, crash: true, unseen: true },
+    ],
+    goals: [{ sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: 4, crash: true }],
+    jobs: [],
+    attention: [],
+    crashes: 1,
+  }
+  const store = fakeStore({ plan: oldPlan })
+  const { engine, probe } = engineFor({ store })
+
+  const hydrated = await engine.hydrate({ residue: null })
+  assert.equal(hydrated.durable, true)
+  const after = store.read()
+  const s1 = after.sessions.find((row) => row.sessionId === 's1')
+  assert.equal(s1.intent, 'mount')
+  assert.equal(s1.running, false)
+  assert.equal(s1.epoch, 0)
+  assert.equal(s1.unseen, true)
+  assert.equal(after.sessions.find((row) => row.sessionId === 's2').intent, 'mount')
+
+  probe.calls.length = 0
+  await engine.resume()
+  const sessionCalls = probe.calls.filter((call) => call[0] === 'session')
+  assert.equal(sessionCalls.some((call) => call[1] === 's1' && call[2] === 'continue'), false)
+})
+
+// A pause plan is what a person stopped by hand, so a boot without a heartbeat leaves it alone.
+test('a boot without a heartbeat leaves a pause plan continuable', async () => {
+  const paused = pausedPlan({ sessions: [{ sessionId: 's1', intent: 'continue', epoch: 1, running: true, lastTurn: 4 }] })
+  const store = fakeStore({ plan: paused })
+  const { engine, probe } = engineFor({ store })
+  await engine.hydrate({ residue: null })
+  const row = store.read().sessions.find((item) => item.sessionId === 's1')
+  assert.equal(row.intent, 'continue')
+  assert.equal(row.running, true)
+  probe.calls.length = 0
+  await engine.resume()
+  const sessionCalls = probe.calls.filter((call) => call[0] === 'session')
+  assert.equal(sessionCalls.some((call) => call[1] === 's1' && call[2] === 'continue'), true)
+})
+
+// A Host can start restoring before this boot's hydrate ran, so the residue is checked once more at
+// dispatch: a crash row the residue does not name is mounted, never continued.
+test('a crash row the residue does not name is mounted even when dispatch starts first', async () => {
+  const crash = {
+    ...pausedPlan({ sessions: [
+      { sessionId: 's1', intent: 'continue', epoch: 2, running: true, lastTurn: 10, crash: true },
+      { sessionId: 's2', intent: 'continue', epoch: 2, running: true, lastTurn: 40, crash: true },
+    ] }),
+    planId: 'crash-direct-1',
+    source: 'crash',
+  }
+  const store = fakeStore({ plan: crash })
+  const heartbeat = { residue: { at: 1700000400000, sessions: [{ sessionId: 's1', lastTurn: 10 }], goals: [] } }
+  const { engine, probe } = engineFor({ store, heartbeat })
+  probe.calls.length = 0
+  await engine.resume()
+  const sessionCalls = probe.calls.filter((call) => call[0] === 'session')
+  assert.equal(sessionCalls.some((call) => call[1] === 's1' && call[2] === 'continue'), true)
+  assert.equal(sessionCalls.some((call) => call[1] === 's2' && call[2] === 'continue'), false)
 })
 
 // §2.4 — a mounted session the probe could not read is assessed again instead of staying unknown
