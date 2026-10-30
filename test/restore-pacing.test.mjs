@@ -424,3 +424,81 @@ test('an archived crash record leaves pending.json, so the next boot does not re
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('a round held back by its own pacing comes back for the rest without another press', async () => {
+  const MB = 1048576
+  // A pause plan, not a crash plan: a crash plan lives in pending.json, so consuming it leaves the
+  // snapshot copy alone and this test could not tell a finished plan from an abandoned one.
+  const store = fakeStore({ plan: { ...planOf([
+    { sessionId: 'd1', lastTurn: 10 },
+    { sessionId: 'd2', lastTurn: 10 },
+    { sessionId: 'd3', lastTurn: 10 },
+  ]), source: 'pause' } })
+  // No blanket verdict: the probe reports an open turn only for a session it actually restored, which
+  // is what a live continuation looks like. A never-touched row must be mounted, not adopted.
+  const probe = pacingProbe({ weights: { d1: 40 * MB, d2: 40 * MB, d3: 40 * MB } })
+  const engine = createEngine({ store, probe, bootId: 'b-drain', restoreSettleMs: 120, restoreConcurrency: 1, log: () => {} })
+  const first = await engine.resume()
+  assert.equal(first.status, 'partial')
+  assert.deepEqual(
+    probe.calls.filter(([kind]) => kind === 'session').map(([, id]) => id),
+    ['d1'],
+    'one press mounts one large transcript; the rest wait for it to settle',
+  )
+  const deadline = Date.now() + 8000
+  while (Date.now() < deadline && store.state.plan !== null) {
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  assert.deepEqual(
+    probe.calls.filter(([kind]) => kind === 'session').map(([, id]) => id),
+    ['d1', 'd2', 'd3'],
+    'a row held back because the restored session is still working is retried by the engine itself',
+  )
+  assert.equal(store.state.plan, null, 'the plan is consumed once every row is restored')
+  const lastWrite = store.state.writes.at(-1)
+  assert.deepEqual(
+    lastWrite.sessions.filter((row) => row.deferred !== undefined).map((row) => row.sessionId),
+    [],
+    'a row that landed must not keep the hold marker that explained the wait',
+  )
+})
+
+test('a pause stops the queued restore round instead of mounting one more session', async () => {
+  const MB = 1048576
+  const store = fakeStore({ plan: { ...planOf([
+    { sessionId: 'p1', lastTurn: 10 },
+    { sessionId: 'p2', lastTurn: 10 },
+  ]), source: 'pause' } })
+  const probe = pacingProbe({ weights: { p1: 40 * MB, p2: 40 * MB } })
+  const engine = createEngine({ store, probe, bootId: 'b-pause-drain', restoreSettleMs: 400, restoreConcurrency: 1, log: () => {} })
+  const first = await engine.resume()
+  assert.equal(first.status, 'partial')
+  assert.deepEqual(probe.calls.filter(([kind]) => kind === 'session').map(([, id]) => id), ['p1'])
+  await engine.pause()
+  await new Promise((resolve) => setTimeout(resolve, 900))
+  assert.deepEqual(
+    probe.calls.filter(([kind]) => kind === 'session').map(([, id]) => id),
+    ['p1'],
+    'a timer must not press past a stop the person asked for',
+  )
+})
+
+test('the drain allowance stops a queue that keeps restoring nothing', async () => {
+  const MB = 1048576
+  const lines = []
+  const store = fakeStore({ plan: { ...planOf([
+    { sessionId: 'q1', lastTurn: 10 },
+    { sessionId: 'q2', lastTurn: 10 },
+  ]), source: 'pause' } })
+  const probe = pacingProbe({ weights: { q1: 40 * MB, q2: 40 * MB } })
+  const engine = createEngine({ store, probe, bootId: 'b-drain-cap', restoreSettleMs: 80, restoreConcurrency: 1, maxRestoreAttempts: 0, log: (message) => lines.push(String(message)) })
+  const first = await engine.resume()
+  assert.equal(first.status, 'partial')
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  assert.deepEqual(
+    probe.calls.filter(([kind]) => kind === 'session').map(([, id]) => id),
+    ['q1'],
+    'a zero allowance never starts another round',
+  )
+  assert.ok(lines.some((line) => line.includes('restore drain stopped')), 'the stop is reported in the log')
+})

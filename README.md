@@ -189,6 +189,12 @@ So a restore is paced by what it can afford to hold, not only by what it has to 
 * **Heavy sessions run alone.** A session whose compressed transcript is above `restoreHeavyMB`
   gets a step of its own; the next one starts when its turn ends, or after `restoreSettleMs` (90 s)
   as the upper bound.
+* **One press drains the queue.** A row held back only because an earlier restored session was
+  still working is retried by the engine itself, one `restoreSettleMs` later, until nothing is left.
+  Before 0.8.4 the same press mounted exactly one large transcript and left the rest for a person to
+  press for again, which is what `partial` after every restart looked like. The retry stops on a
+  stop the person asked for, on a reload, and after `restoreMaxAttempts` rounds that restored
+  nothing.
 * **Heap gate.** Before each step the restore reads `v8.getHeapStatistics()`. If the headroom left
   is below `restoreHeapReserveMB`, the round mounts nothing further. A session that did not get its
   turn is recorded in `deferred` and left unstarted — loading its transcript is exactly the cost the
