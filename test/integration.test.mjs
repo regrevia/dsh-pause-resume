@@ -51,7 +51,7 @@ function harness({ live = { readable: true, sessions: [], goals: [], jobs: [] },
       planId: options.planId,
       status: 'paused',
       source: 'crash',
-      createdAt: '1970-01-01T00:00:00.000Z',
+      createdAt: new Date().toISOString(),
       sessions: residue.sessions.map((row) => ({ sessionId: row.sessionId, running: false, lastTurn: null, crash: true })),
       goals: [],
       jobs: [],
@@ -109,7 +109,7 @@ test('a pause interrupted in its stop is mounted by the next process, never cont
       planId: 'pause-interrupted-1',
       status: 'pausing',
       source: 'pause',
-      createdAt: 1700000000000,
+      createdAt: Date.now(),
       sessions: [{ sessionId: 's1', intent: 'continue', running: true, epoch: 1, lastTurn: 3 }],
       goals: [],
       jobs: [],
@@ -283,8 +283,8 @@ test('goal-only crash residue goes through the real plan reader and restores the
     const probe = harness()
     probe.crashPlan = createProbe({}, {}).crashPlan
     const store = createStore(dir, { log: () => {} })
-    const engine = createEngine({ store, probe, now: () => 1700000000000, bootId: 'boot-1', log: () => {} })
-    await engine.hydrate({ residue: { sessions: [], goals: [{ sessionId: 's2', goalId: 'g2', revision: 3 }], at: 9 } })
+    const engine = createEngine({ store, probe, now: () => Date.now(), bootId: 'boot-1', log: () => {} })
+    await engine.hydrate({ residue: { sessions: [], goals: [{ sessionId: 's2', goalId: 'g2', revision: 3 }], at: Date.now() } })
 
     assert.notEqual(store.readPending(), null)
     assert.deepEqual(store.readPending().sessions, [])

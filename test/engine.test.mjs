@@ -96,7 +96,7 @@ function fakeProbe(live = { sessions: [], goals: [], jobs: [], readable: true },
         planId: options.planId,
         status: 'paused',
         source: 'crash',
-        createdAt: '1970-01-01T00:00:00.000Z',
+        createdAt: new Date().toISOString(),
         sessions: residue.sessions.map((row) => ({ sessionId: row.sessionId, running: false, lastTurn: null, crash: true })),
         goals: [],
         jobs: [],
@@ -400,7 +400,7 @@ test('a crash residue is offered for restore after boot and released only once i
     flush: async () => true,
   }
   const plan = {
-    version: 2, planId: 'crash-1700000000000-1', status: 'paused', source: 'crash', createdAt: '1970-01-01T00:00:00.000Z',
+    version: 2, planId: 'crash-1700000000000-1', status: 'paused', source: 'crash', createdAt: new Date().toISOString(),
     sessions: [{ sessionId: 's1', running: false, lastTurn: null, crash: true }], goals: [], jobs: [],
   }
   const store = fakeStore()
@@ -445,7 +445,7 @@ test('hydrate() re-derives crash rows a build without live turns wrote as mount-
     planId: 'crash-1700-1',
     status: 'paused',
     source: 'crash',
-    createdAt: '1970-01-01T00:00:00.000Z',
+    createdAt: new Date().toISOString(),
     sessions: [
       { sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true, retry: 2 },
       { sessionId: 's2', intent: 'mount', epoch: 0, running: false, lastTurn: null, crash: true },
@@ -461,7 +461,7 @@ test('hydrate() re-derives crash rows a build without live turns wrote as mount-
     planId: options.planId,
     status: 'paused',
     source: 'crash',
-    createdAt: '1970-01-01T00:00:00.000Z',
+    createdAt: new Date().toISOString(),
     sessions: [{ sessionId: 's1', intent: 'continue', epoch: 0, running: true, lastTurn: 7, crash: true }],
     goals: [{ sessionId: 's1', goalId: 'g1', revision: 4, armedRevision: 4, crash: true }],
     jobs: [],
@@ -1878,7 +1878,7 @@ test('a restore whose rows stay unreadable retires as partial instead of pressin
     planId: 'crash-unknown-1',
     status: 'paused',
     source: 'crash',
-    createdAt: '1970-01-01T00:00:00.000Z',
+    createdAt: new Date().toISOString(),
     sessions: [{ sessionId: 's1', running: false, lastTurn: 3, intent: 'unknown', epoch: 0, crash: true }],
     goals: [],
     jobs: [],
@@ -1920,7 +1920,7 @@ test('a late readable row is still restored once, so retirement waits for real p
     planId: 'crash-unknown-2',
     status: 'paused',
     source: 'crash',
-    createdAt: '1970-01-01T00:00:00.000Z',
+    createdAt: new Date().toISOString(),
     sessions: [{ sessionId: 's1', running: false, lastTurn: 3, intent: 'unknown', epoch: 0, crash: true }],
     goals: [],
     jobs: [],
@@ -1950,7 +1950,7 @@ test('a manual continue during the press is progress, not a duplicate, and clear
     planId: 'crash-manual-1',
     status: 'paused',
     source: 'crash',
-    createdAt: '1970-01-01T00:00:00.000Z',
+    createdAt: new Date().toISOString(),
     sessions: [
       { sessionId: 's1', running: false, lastTurn: 3, intent: 'unknown', epoch: 0, crash: true },
       { sessionId: 's2', running: false, lastTurn: 3, intent: 'unknown', epoch: 0, crash: true },
@@ -2004,7 +2004,7 @@ test('a partial press replaces the captured crash count with only the rows still
     planId: 'crash-stale-1',
     status: 'paused',
     source: 'crash',
-    createdAt: '1970-01-01T00:00:00.000Z',
+    createdAt: new Date().toISOString(),
     sessions: [
       { sessionId: 's1', running: false, lastTurn: 3, intent: 'unknown', epoch: 0, crash: true },
       { sessionId: 's2', running: false, lastTurn: 3, intent: 'unknown', epoch: 0, crash: true },

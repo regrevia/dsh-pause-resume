@@ -1,6 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createEngine } from '../lib/engine.js'
+import { createStore } from '../lib/snapshot.js'
 
 /**
  * Restore pacing is memory safety, not a preference. Each test below pins one of the rules the
@@ -39,6 +43,7 @@ function fakeStore({ plan = null } = {}) {
     consume: (next, summary, status = 'restored') => {
       state.result = { planId: next.planId, status, summary }
       state.plan = null
+      state.pending = null
       state.journal.clear()
       return { ok: true, archivePath: '/tmp/restores/x.json', published: true }
     },
@@ -366,4 +371,56 @@ test('a session mounted by an earlier boot is not loaded again on the next one',
   const mounted = probe.calls.filter(([kind]) => kind === 'session').map(([, id]) => id)
   assert.deepEqual(mounted, ['owed'], 'a mounted session must not be mounted twice across restarts')
   assert.equal(store.state.result.status, 'restored', 'the adopted row still lets the plan finish')
+})
+
+
+test('a crash record from days ago is archived instead of mounted', async () => {
+  const T = Date.parse('2026-10-30T05:00:00.000Z')
+  const probe = pacingProbe()
+  const store = fakeStore()
+  store.writePending({ ...planOf([{ sessionId: 'old-1' }, { sessionId: 'old-2' }]), createdAt: new Date(T - 100 * 3600000).toISOString() })
+  const engine = createEngine({ store, probe, bootId: 'b1', now: () => T, log: () => {} })
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'expired')
+  assert.equal(probe.calls.length, 0, 'nothing is assessed or mounted for a plan this old')
+  assert.equal(store.state.pending, null, 'the archived plan is not left behind to be mounted again')
+  assert.equal(store.state.result.status, 'expired')
+  assert.equal(store.state.result.summary.ageHours, 100)
+  assert.equal(store.state.result.summary.counts.sessions, 2, 'the record still says how much was archived')
+  const state = engine.describe()
+  assert.equal(state.expired.ageHours, 100)
+  assert.equal(state.expired.archived, true)
+  assert.equal(state.action, 'none', 'there is nothing left to press')
+})
+
+test('an interruption still recent enough to be owed is restored, not archived', async () => {
+  const T = Date.parse('2026-10-30T05:00:00.000Z')
+  const probe = pacingProbe()
+  const store = fakeStore()
+  store.writePending({ ...planOf([{ sessionId: 'fresh' }]), createdAt: new Date(T - 3600000).toISOString() })
+  const engine = createEngine({ store, probe, bootId: 'b1', now: () => T, log: () => {} })
+  const outcome = await engine.resume()
+  assert.notEqual(outcome.status, 'expired')
+  assert.equal(probe.calls.some(([kind]) => kind === 'session'), true)
+  assert.equal(engine.describe().expired, null)
+})
+
+test('an archived crash record leaves pending.json, so the next boot does not read it again', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pr-expire-'))
+  try {
+    const store = createStore(dir, { log: () => {} })
+    const plan = { ...planOf([{ sessionId: 'gone' }]), createdAt: new Date(Date.now() - 100 * 3600000).toISOString() }
+    store.writePending(plan)
+    assert.notEqual(store.readPending(), null)
+    const engine = createEngine({ store, probe: pacingProbe(), bootId: 'b2', log: () => {} })
+    const outcome = await engine.resume()
+    assert.equal(outcome.status, 'expired')
+    assert.equal(store.readPending(), null, 'the dead plan must not be left for the next boot to read')
+    assert.equal(store.hasPending(), false)
+    const record = store.lastRestore()
+    assert.equal(record.status, 'expired')
+    assert.equal(record.planId, plan.planId)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

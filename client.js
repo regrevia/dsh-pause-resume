@@ -19,6 +19,7 @@ window.__ModuleLoader__.load({
           contAttention: (n) => `${n} 个任务上次没有恢复`,
           restart: '跑完这些任务后重启宿主', // ui-copy-ignore
           restartHeld: '重启后继续没放下的内容', // ui-copy-ignore
+          expired: (hours) => `${hours >= 48 ? `${Math.round(hours / 24)} 天` : `${Math.round(hours)} 小时`}前中断的工作已归档，不再恢复`, // ui-copy-ignore
         }
       : {
           pause: 'Pause', // ui-copy-ignore
@@ -33,6 +34,7 @@ window.__ModuleLoader__.load({
           contAttention: (n) => `${n} ${n === 1 ? 'task did' : 'tasks did'} not resume last time`,
           restart: 'Restart the host when this work is done', // ui-copy-ignore
           restartHeld: 'Restart to continue what was held back', // ui-copy-ignore
+          expired: (hours) => `Work interrupted ${hours >= 48 ? `${Math.round(hours / 24)} days` : `${Math.round(hours)} hours`} ago was archived, not restored`, // ui-copy-ignore
         }
 
     const HOST_BASE = '/dsh-pause-resume' // ui-copy-ignore
@@ -175,6 +177,8 @@ window.__ModuleLoader__.load({
         return failed > 0 ? `${base} · ${COPY.contAttention(failed)}` : base
       }
       const focus = typeof state.focus === 'string' && state.focus !== '' ? state.focus : ''
+      const expired = state.expired
+      if (expired !== null && expired !== undefined && typeof expired === 'object' && Number.isFinite(expired.ageHours)) return COPY.expired(expired.ageHours)
       // Rows this process held back are still owed work, and pressing again cannot mount them: the
       // same heap is still there. "Press again" would be a loop, so the restart is the one next step.
       const held = Array.isArray(state.scheduling?.deferred) ? state.scheduling.deferred.length : 0

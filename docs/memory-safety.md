@@ -37,7 +37,9 @@ FATAL ERROR: MarkCompactCollector: young object promotion failed
    轻会话一轮最多 `restoreConcurrency` 个同时进行（V8 上限 ≥ 3 GB 时 2，小内存机器 1）。
 3. **大会话独占。** 压缩转录体积 ≥ `restoreHeavyMB` 的会话进入独占段：一次只恢复一个，
    等它的 turn 结束，或等到 `restoreSettleMs`（默认 90 s）上限，再恢复下一个。
-4. **堆余量闸门。** 每步恢复前读 `v8.getHeapStatistics()`；剩余余量低于 `restoreHeapReserveMB`
+4. **过期不重放。** 崩溃记录超过 `restoreMaxAgeHours`（默认 72 小时）就整份归档到 `restores/`，
+   不再挂载：那些会话已经空闲了好几天，重新打开只是把堆花在别人已经放下的事情上。
+5. **堆余量闸门。** 每步恢复前读 `v8.getHeapStatistics()`；剩余余量低于 `restoreHeapReserveMB`
    就不再挂载任何会话。没轮到的会话不加载转录（加载它正是闸门要避免的开销），
    只写入 `deferred` 记录，留给下次启动或手动恢复。
 
@@ -107,6 +109,7 @@ FATAL ERROR: MarkCompactCollector: young object promotion failed
 | `restoreHeavyMB` | `heapLimitMB / 340`，夹在 8–48 MB | 压缩转录到这个体积即算大会话，进入独占段 |
 | `restoreHeapReserveMB` | V8 上限的 `22%`，夹在 320–1536 MB | 堆余量低于它就停止本轮恢复 |
 | `restoreSettleMs` | `90000` | 等大会话 turn 结束的上限 |
+| `restoreMaxAgeHours` | `72` | 超过这个小时数的崩溃记录归档，不再挂载 |
 
 三个内存数字都按**这台进程实际的 V8 上限**推导，不写死机器值：上限 4 GB 和 16 GB 不能用同一个余量，
 小内存机器还要退成一次一个。`/state.scheduling` 给出解析后的 `heavyMB`、`reserveMB`、`concurrency`，

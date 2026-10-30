@@ -395,6 +395,9 @@ export function apply(ctx, config = {}) {
     restoreHeavyMB: Number.isFinite(config?.restoreHeavyMB) && config.restoreHeavyMB > 0 ? config.restoreHeavyMB : null,
     restoreHeapReserveMB: Number.isFinite(config?.restoreHeapReserveMB) && config.restoreHeapReserveMB > 0 ? config.restoreHeapReserveMB : null,
     restoreSettleMs: Number.isFinite(config?.restoreSettleMs) && config.restoreSettleMs >= 0 ? config.restoreSettleMs : 90000,
+    // A crash record older than this is archived instead of mounted: the sessions it names have been
+    // idle for days, and mounting them spends heap on work the person already moved past.
+    restoreMaxAgeHours: Number.isFinite(config?.restoreMaxAgeHours) && config.restoreMaxAgeHours > 0 ? config.restoreMaxAgeHours : 72,
     maxRestoreAttempts: Number.isSafeInteger(config?.restoreMaxAttempts) && config.restoreMaxAttempts > 0 ? config.restoreMaxAttempts : 3,
     log,
   })

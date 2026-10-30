@@ -227,6 +227,7 @@ the heap instead of from config.
 | `restoreHeavyMB` | `heapLimitMB / 340`, clamped to 8–48 MB | compressed-transcript size that makes a session heavy |
 | `restoreHeapReserveMB` | `22%` of the V8 cap, clamped to 320–1536 MB | heap headroom below which a round mounts nothing |
 | `restoreSettleMs` | `90000` | upper bound to wait for a heavy session's turn |
+| `restoreMaxAgeHours` | `72` | a crash record older than this is archived, not mounted |
 
 All four are optional; setting one pins that number and leaves the others derived.
 
