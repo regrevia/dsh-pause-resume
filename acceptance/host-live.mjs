@@ -291,12 +291,20 @@ try {
       && statePaused.json?.phase === 'paused'
       && statePaused.json?.outstanding >= 1
       && statePaused.json?.counts?.sessions === 1
-      && statePaused.json?.live?.sessions === 0,
+      && statePaused.json?.live?.sessions === 0
+      // The held turn cannot wrap up: the window must expire, and a press must say so. Whether the
+      // steer could be taken back depends on the build's inbox surface, so either answer is proof of
+      // the attempt; pretending it was retracted without a removal would not be.
+      && Array.isArray(paused.json?.outcome?.wrapUp?.timedOut) === true
+      && paused.json.outcome.wrapUp.timedOut.includes(SESSION_ID)
+      && [paused.json.outcome.wrapUp.retracted, paused.json.outcome.wrapUp.retractUnavailable]
+        .some((list) => Array.isArray(list) && list.includes(SESSION_ID)),
     status: paused.status,
     outcome: paused.json?.outcome,
     phase: statePaused.json?.phase,
     outstanding: statePaused.json?.outstanding,
     counts: statePaused.json?.counts,
+    wrapUp: paused.json?.outcome?.wrapUp,
   })
   if (paused.json?.outcome?.status !== 'paused') throw new Error(`pause did not record the live turn: ${JSON.stringify(paused.json)}`)
 

@@ -73,7 +73,7 @@ function pauseProbe() {
 }
 
 function wrapUpReport(overrides = {}) {
-  return { windowMs: 3000, steered: [], completed: [], timedOut: [], unavailable: null, ...overrides }
+  return { windowMs: 3000, steered: [], completed: [], timedOut: [], unavailable: null, retracted: [], retractUnavailable: [], ...overrides }
 }
 
 function engineOf({ store = fakeStore(), probe = pauseProbe(), ...options } = {}) {
@@ -164,6 +164,8 @@ test('a turn that finished inside the window keeps a continuation marker, a canc
     completed: ['a'],
     timedOut: ['b', 'c'],
     unavailable: 'no-session',
+    retracted: [],
+    retractUnavailable: [],
   })
   assert.deepEqual(outcome.wrapUp, persisted.wrapUp, 'the press answers with the report it wrote')
   assert.deepEqual(outcome.counts, { sessions: 4, goals: 0, jobs: 0 })

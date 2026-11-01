@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-01T05:03:35.278Z",
+  "generatedAt": "2026-11-01T06:44:45.966Z",
   "kind": "host-live",
   "plugin": {
     "name": "dsh-pause-resume",
@@ -14,7 +14,7 @@
     "profile": "live",
     "baseProfile": "web",
     "note": "throwaway DSH_HOME and OS-assigned port; the real ~/.dsh profile is not read or written",
-    "port": "http://127.0.0.1:65283"
+    "port": "http://127.0.0.1:60300"
   },
   "mock": {
     "kind": "acceptance/mock-llm.mjs",
@@ -35,15 +35,15 @@
         "lastRole": "user",
         "lastText": "Generate the session title from this JSON array of human messages:\n[{\"seq\":8,\"text\":\"live turn for crash-turn-backfill\"}]",
         "held": false,
-        "finishedAt": "2026-11-01T05:03:39.344Z"
+        "finishedAt": "2026-11-01T06:44:47.762Z"
       },
       {
         "n": 3,
-        "messages": 9,
+        "messages": 8,
         "lastRole": "user",
-        "lastText": "Time sampled while preparing turn 2, step 1: 2026-11-01T13:03:42+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
+        "lastText": "Time sampled while preparing turn 2, step 1: 2026-11-01T14:44:51+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
         "held": false,
-        "finishedAt": "2026-11-01T05:03:43.223Z"
+        "finishedAt": "2026-11-01T06:44:51.595Z"
       }
     ]
   },
@@ -54,39 +54,39 @@
   "steps": [
     {
       "step": "profile-created",
-      "at": "2026-11-01T05:03:35.738Z",
+      "at": "2026-11-01T06:44:46.259Z",
       "ok": true,
       "code": 0,
       "profile": "live",
       "from": "web",
-      "stderr": "[1101/130335.491403:ERROR:electron/shell/app/node_main.cc:154] Node.js environment variables are disabled because this process is invoked by other apps.\n"
+      "stderr": "[1101/144446.042055:ERROR:electron/shell/app/node_main.cc:154] Node.js environment variables are disabled because this process is invoked by other apps.\n"
     },
     {
       "step": "plugin-installed",
-      "at": "2026-11-01T05:03:38.208Z",
+      "at": "2026-11-01T06:44:46.664Z",
       "ok": true,
       "code": 0,
       "plugin": "<repo>",
-      "stderr": "[1101/130335.787268:ERROR:electron/shell/app/node_main.cc:154] Node.js environment variables are disabled because this process is invoked by other apps.\n"
+      "stderr": "[1101/144446.305869:ERROR:electron/shell/app/node_main.cc:154] Node.js environment variables are disabled because this process is invoked by other apps.\n"
     },
     {
       "step": "model-overridden",
-      "at": "2026-11-01T05:03:38.214Z",
+      "at": "2026-11-01T06:44:46.669Z",
       "ok": true,
       "provider": "mock",
       "api": "openai-completions",
-      "baseURL": "http://127.0.0.1:65272/v1"
+      "baseURL": "http://127.0.0.1:60290/v1"
     },
     {
       "step": "host-ready",
-      "at": "2026-11-01T05:03:38.953Z",
+      "at": "2026-11-01T06:44:47.379Z",
       "ok": true,
-      "url": "http://127.0.0.1:65273",
+      "url": "http://127.0.0.1:60291",
       "boot": 1
     },
     {
       "step": "live-turn-running",
-      "at": "2026-11-01T05:03:39.111Z",
+      "at": "2026-11-01T06:44:47.536Z",
       "ok": true,
       "phase": "idle",
       "liveSessions": 1,
@@ -99,7 +99,7 @@
     },
     {
       "step": "paused-with-plan",
-      "at": "2026-11-01T05:03:42.218Z",
+      "at": "2026-11-01T06:44:50.645Z",
       "ok": true,
       "status": 200,
       "outcome": {
@@ -119,7 +119,11 @@
           "timedOut": [
             "spike-live-turn"
           ],
-          "unavailable": null
+          "unavailable": null,
+          "retracted": [
+            "spike-live-turn"
+          ],
+          "retractUnavailable": []
         },
         "continues": {
           "cancelled": false,
@@ -133,11 +137,26 @@
         "sessions": 1,
         "goals": 0,
         "jobs": 0
+      },
+      "wrapUp": {
+        "windowMs": 3000,
+        "steered": [
+          "spike-live-turn"
+        ],
+        "completed": [],
+        "timedOut": [
+          "spike-live-turn"
+        ],
+        "unavailable": null,
+        "retracted": [
+          "spike-live-turn"
+        ],
+        "retractUnavailable": []
       }
     },
     {
       "step": "crashed",
-      "at": "2026-11-01T05:03:42.241Z",
+      "at": "2026-11-01T06:44:50.663Z",
       "ok": true,
       "signal": "SIGKILL",
       "code": null,
@@ -145,14 +164,14 @@
     },
     {
       "step": "host-ready",
-      "at": "2026-11-01T05:03:42.766Z",
+      "at": "2026-11-01T06:44:51.161Z",
       "ok": true,
-      "url": "http://127.0.0.1:65283",
+      "url": "http://127.0.0.1:60300",
       "boot": 2
     },
     {
       "step": "plan-survived-crash",
-      "at": "2026-11-01T05:03:42.809Z",
+      "at": "2026-11-01T06:44:51.200Z",
       "ok": true,
       "phase": "paused",
       "outstanding": 1,
@@ -164,13 +183,13 @@
     },
     {
       "step": "resumed",
-      "at": "2026-11-01T05:03:42.902Z",
+      "at": "2026-11-01T06:44:51.282Z",
       "ok": true,
       "status": 200,
       "outcome": {
         "status": "resumed",
         "summary": {
-          "planId": "pause-mvxd78mg-1",
+          "planId": "pause-mvxgtb1t-1",
           "source": "pause",
           "restored": [
             "session spike-live-turn"
@@ -190,18 +209,18 @@
           ],
           "jobs": 0,
           "jobsStopped": [],
-          "at": "2026-11-01T05:03:42.810Z"
+          "at": "2026-11-01T06:44:51.201Z"
         }
       }
     },
     {
       "step": "continuation-request",
-      "at": "2026-11-01T05:03:43.365Z",
+      "at": "2026-11-01T06:44:51.744Z",
       "ok": true,
       "afterResume": {
         "n": 3,
-        "messages": 9,
-        "lastText": "Time sampled while preparing turn 2, step 1: 2026-11-01T13:03:42+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
+        "messages": 8,
+        "lastText": "Time sampled while preparing turn 2, step 1: 2026-11-01T14:44:51+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
         "carriesTurnText": true
       },
       "beforeCrash": {
@@ -213,7 +232,7 @@
     },
     {
       "step": "exactly-once",
-      "at": "2026-11-01T05:03:46.368Z",
+      "at": "2026-11-01T06:44:54.745Z",
       "ok": true,
       "turnRequests": 2,
       "totalRequests": 3,
@@ -221,10 +240,10 @@
     },
     {
       "step": "restore-record",
-      "at": "2026-11-01T05:03:46.369Z",
+      "at": "2026-11-01T06:44:54.746Z",
       "ok": true,
       "files": [
-        "pause-mvxd78mg-1.json"
+        "pause-mvxgtb1t-1.json"
       ],
       "row": {
         "sessionId": "spike-live-turn",
@@ -235,8 +254,8 @@
         "owedContinue": true,
         "wrapUp": "cancelled",
         "continuedTurn": 2,
-        "restoreDoneAt": "2026-11-01T05:03:42.858Z",
-        "restoreDoneBoot": "34443-mvxd7ba9"
+        "restoreDoneAt": "2026-11-01T06:44:51.247Z",
+        "restoreDoneBoot": "58093-mvxgtdp5"
       },
       "summaryRow": {
         "key": "s:spike-live-turn",
@@ -248,7 +267,7 @@
     },
     {
       "step": "model-text-in-session",
-      "at": "2026-11-01T05:03:46.373Z",
+      "at": "2026-11-01T06:44:54.748Z",
       "ok": true,
       "sessionId": "spike-live-turn",
       "mockTextOccurrences": 3
@@ -281,7 +300,11 @@
           "timedOut": [
             "spike-live-turn"
           ],
-          "unavailable": null
+          "unavailable": null,
+          "retracted": [
+            "spike-live-turn"
+          ],
+          "retractUnavailable": []
         },
         "continues": {
           "cancelled": false,
@@ -307,7 +330,7 @@
     "resume": {
       "status": "resumed",
       "summary": {
-        "planId": "pause-mvxd78mg-1",
+        "planId": "pause-mvxgtb1t-1",
         "source": "pause",
         "restored": [
           "session spike-live-turn"
@@ -327,12 +350,12 @@
         ],
         "jobs": 0,
         "jobsStopped": [],
-        "at": "2026-11-01T05:03:42.810Z"
+        "at": "2026-11-01T06:44:51.201Z"
       }
     },
     "continuation": {
       "request": 3,
-      "messages": 9,
+      "messages": 8,
       "carriesTurnText": true
     },
     "plan": {
@@ -346,12 +369,12 @@
         "owedContinue": true,
         "wrapUp": "cancelled",
         "continuedTurn": 2,
-        "restoreDoneAt": "2026-11-01T05:03:42.858Z",
-        "restoreDoneBoot": "34443-mvxd7ba9"
+        "restoreDoneAt": "2026-11-01T06:44:51.247Z",
+        "restoreDoneBoot": "58093-mvxgtdp5"
       }
     },
     "duplicateContinuation": false
   },
   "verdict": "pass",
-  "finishedAt": "2026-11-01T05:03:46.426Z"
+  "finishedAt": "2026-11-01T06:44:54.796Z"
 }

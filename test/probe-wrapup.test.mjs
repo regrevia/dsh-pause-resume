@@ -131,6 +131,10 @@ test('a wrap-up window steers first, and a turn that ends there is not cancelled
     completed: ['s1'],
     timedOut: ['s2'],
     unavailable: null,
+    retracted: [],
+    // These fake agents expose no inbox, so the stale steer cannot be taken back: the press reports
+    // that instead of claiming a clean retraction.
+    retractUnavailable: ['s2'],
   })
   // s1 ended its own turn during the window: the press leaves it alone. s2 did not, so it is stopped.
   assert.deepEqual(fake.calls.filter((call) => call[0] === 'cancel').map((call) => call[1]), ['s2'])
@@ -150,6 +154,9 @@ test('a steer that throws falls back to the normal cancel instead of failing the
     // session falls straight through to the normal cancel.
     timedOut: [],
     unavailable: null,
+    // Nothing was steered and nothing timed out, so there is no queued message to take back.
+    retracted: [],
+    retractUnavailable: [],
   })
   assert.deepEqual(stopped.canceled, ['s1'])
   assert.deepEqual(stopped.unknown, [])

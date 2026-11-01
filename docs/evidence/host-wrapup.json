@@ -1,0 +1,394 @@
+{
+  "generatedAt": "2026-11-01T06:46:05.951Z",
+  "kind": "host-wrapup",
+  "plugin": {
+    "name": "dsh-pause-resume",
+    "version": "0.9.0"
+  },
+  "host": {
+    "kind": "isolated-electron",
+    "electron": "/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness",
+    "cli": "/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js",
+    "dshHome": "<tmp>",
+    "dshHomeRetained": false,
+    "profile": "wrapup",
+    "baseProfile": "web",
+    "note": "throwaway DSH_HOME and OS-assigned port; the real ~/.dsh profile is not read or written"
+  },
+  "mock": {
+    "kind": "acceptance/mock-llm.mjs",
+    "holdRequests": 1,
+    "text": "MOCK_WRAPUP_OK",
+    "requests": [
+      {
+        "n": 1,
+        "messages": 3,
+        "lastRole": "user",
+        "lastText": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: \"<repo>\".\n\nC",
+        "held": true,
+        "heldAt": "2026-11-01T06:46:05.206Z",
+        "releasedAt": "2026-11-01T06:46:05.608Z",
+        "finishedAt": "2026-11-01T06:46:05.608Z"
+      },
+      {
+        "n": 2,
+        "messages": 2,
+        "lastRole": "user",
+        "lastText": "Generate the session title from this JSON array of human messages:\n[{\"seq\":8,\"text\":\"live turn for pause wrap-up\"}]",
+        "held": false,
+        "heldAt": null,
+        "releasedAt": null,
+        "finishedAt": "2026-11-01T06:46:05.291Z"
+      },
+      {
+        "n": 3,
+        "messages": 5,
+        "lastRole": "user",
+        "lastText": "用户要求暂停当前任务。请停止开展新的工作，基于已有信息简短说明已完成内容、未完成内容和继续时的下一步，然后结束本轮。不要为了总结再执行检查、启动工具或创建子任务。",
+        "held": false,
+        "heldAt": null,
+        "releasedAt": null,
+        "finishedAt": "2026-11-01T06:46:05.846Z"
+      }
+    ]
+  },
+  "spike": {
+    "file": "acceptance/spike-live-turn.mjs",
+    "note": "generated into the throwaway DSH_HOME only; starts one turn through the public agents service"
+  },
+  "steps": [
+    {
+      "step": "profile-created",
+      "at": "2026-11-01T06:46:03.930Z",
+      "ok": true,
+      "code": 0,
+      "profile": "wrapup",
+      "from": "web",
+      "stderr": "[1101/144603.677741:ERROR:electron/shell/app/node_main.cc:154] Node.js environment variables are disabled because this process is invoked by other apps.\n"
+    },
+    {
+      "step": "plugin-installed",
+      "at": "2026-11-01T06:46:04.287Z",
+      "ok": true,
+      "code": 0,
+      "plugin": "<repo>",
+      "stderr": "[1101/144603.972163:ERROR:electron/shell/app/node_main.cc:154] Node.js environment variables are disabled because this process is invoked by other apps.\n"
+    },
+    {
+      "step": "model-overridden",
+      "at": "2026-11-01T06:46:04.291Z",
+      "ok": true,
+      "provider": "mock",
+      "api": "openai-completions",
+      "baseURL": "http://127.0.0.1:60588/v1"
+    },
+    {
+      "step": "host-ready",
+      "at": "2026-11-01T06:46:04.945Z",
+      "ok": true,
+      "url": "http://127.0.0.1:60589"
+    },
+    {
+      "step": "live-turn-running",
+      "at": "2026-11-01T06:46:05.102Z",
+      "ok": true,
+      "phase": "idle",
+      "liveSessions": 1,
+      "request": {
+        "n": 1,
+        "messages": 3,
+        "held": true,
+        "heldAt": null
+      }
+    },
+    {
+      "step": "wrapup-turn-request",
+      "at": "2026-11-01T06:46:05.893Z",
+      "ok": true,
+      "after": {
+        "n": 3,
+        "messages": 5,
+        "lastRole": "user",
+        "lastText": "用户要求暂停当前任务。请停止开展新的工作，基于已有信息简短说明已完成内容、未完成内容和继续时的下一步，然后结束本轮。不要为了总结再执行检查、启动工具或创建子任务。",
+        "held": false,
+        "at": "2026-11-01T06:46:05.634Z"
+      },
+      "before": {
+        "n": 1,
+        "messages": 3
+      },
+      "note": "a real second turn request carrying the pause steer prompt, not a cancelled turn"
+    },
+    {
+      "step": "paused-after-wrapup",
+      "at": "2026-11-01T06:46:05.896Z",
+      "ok": true,
+      "status": 200,
+      "outcomeStatus": "paused",
+      "counts": {
+        "sessions": 1,
+        "goals": 0,
+        "jobs": 0
+      },
+      "wrapUp": {
+        "windowMs": 3000,
+        "steered": [
+          "spike-live-turn"
+        ],
+        "completed": [
+          "spike-live-turn"
+        ],
+        "timedOut": [],
+        "unavailable": null,
+        "retracted": [],
+        "retractUnavailable": []
+      },
+      "note": "the session was steered and then finished its turn inside the window"
+    },
+    {
+      "step": "normal-terminal-state",
+      "at": "2026-11-01T06:46:05.896Z",
+      "ok": true,
+      "planId": "pause-mvxguywe-1",
+      "planStatus": "paused",
+      "row": {
+        "sessionId": "spike-live-turn",
+        "running": true,
+        "intent": "continue",
+        "epoch": 1,
+        "lastTurn": 1,
+        "owedContinue": true,
+        "wrapUp": "completed"
+      },
+      "canceled": [],
+      "planWrapUp": {
+        "windowMs": 3000,
+        "steered": [
+          "spike-live-turn"
+        ],
+        "completed": [
+          "spike-live-turn"
+        ],
+        "timedOut": [],
+        "unavailable": null,
+        "retracted": [],
+        "retractUnavailable": []
+      },
+      "note": "the turn ended with an ordinary completed state, so it was not cancelled; the plan still owes the continuation"
+    },
+    {
+      "step": "state-shows-wrapup",
+      "at": "2026-11-01T06:46:05.896Z",
+      "ok": true,
+      "phase": "paused",
+      "counts": {
+        "sessions": 1,
+        "goals": 0,
+        "jobs": 0
+      },
+      "live": {
+        "sessions": 0,
+        "goals": 0,
+        "jobs": 0,
+        "maintenance": 0
+      },
+      "wrapUp": {
+        "windowMs": 3000,
+        "steered": [
+          "spike-live-turn"
+        ],
+        "completed": [
+          "spike-live-turn"
+        ],
+        "timedOut": [],
+        "unavailable": null,
+        "retracted": [],
+        "retractUnavailable": []
+      }
+    },
+    {
+      "step": "wrapup-reply-in-session",
+      "at": "2026-11-01T06:46:05.899Z",
+      "ok": true,
+      "sessionId": "spike-live-turn",
+      "promptIndex": 10181,
+      "answerIndex": 11287,
+      "mockTextOccurrences": 5,
+      "wrapUpPromptPresent": true,
+      "note": "the wrap-up prompt and a model answer after it are both in the real transcript"
+    }
+  ],
+  "live": {
+    "id": "pause-wrapup-turn",
+    "status": "verified",
+    "reason": "live Host turn: paused with its model stream held open, then released so the wrap-up turn could answer before the window closed; wrap-up completed in the window, turn ended by itself, plan owes one continuation"
+  },
+  "timing": {
+    "startedAt": 1793515563600,
+    "finishedAt": "2026-11-01T06:46:05.951Z",
+    "runtimeMs": 2351
+  },
+  "verdict": "pass",
+  "pause": {
+    "status": 200,
+    "outcome": {
+      "status": "paused",
+      "counts": {
+        "sessions": 1,
+        "goals": 0,
+        "jobs": 0
+      },
+      "outstanding": 1,
+      "wrapUp": {
+        "windowMs": 3000,
+        "steered": [
+          "spike-live-turn"
+        ],
+        "completed": [
+          "spike-live-turn"
+        ],
+        "timedOut": [],
+        "unavailable": null,
+        "retracted": [],
+        "retractUnavailable": []
+      },
+      "continues": {
+        "cancelled": false,
+        "drained": true,
+        "started": []
+      }
+    },
+    "firedAt": 1793515565102,
+    "releasedAt": 1793515565605,
+    "doneAt": 1793515565893,
+    "releaseResult": true,
+    "note": "the press was fired first and the held stream released 500ms later, so the steer arrived at a turn boundary"
+  },
+  "state": {
+    "phase": "paused",
+    "action": "resume",
+    "source": "pause",
+    "complete": true,
+    "outstanding": 1,
+    "counts": {
+      "sessions": 1,
+      "goals": 0,
+      "jobs": 0
+    },
+    "live": {
+      "sessions": 0,
+      "goals": 0,
+      "jobs": 0,
+      "maintenance": 0
+    },
+    "scheduling": {
+      "heap": {
+        "usedMB": 74,
+        "limitMB": 4192
+      },
+      "heapLimitMB": 4192,
+      "heavyMB": 12,
+      "reserveMB": 922,
+      "concurrency": 2,
+      "derived": {
+        "heavyMB": true,
+        "reserveMB": true,
+        "concurrency": true
+      },
+      "deferred": [],
+      "unknownWeights": 0,
+      "restartRecommended": null
+    },
+    "attention": 0,
+    "focus": null,
+    "error": null,
+    "result": null,
+    "outcome": {
+      "status": "paused",
+      "counts": {
+        "sessions": 1,
+        "goals": 0,
+        "jobs": 0
+      },
+      "outstanding": 1,
+      "wrapUp": {
+        "windowMs": 3000,
+        "steered": [
+          "spike-live-turn"
+        ],
+        "completed": [
+          "spike-live-turn"
+        ],
+        "timedOut": [],
+        "unavailable": null,
+        "retracted": [],
+        "retractUnavailable": []
+      }
+    },
+    "wrapUp": {
+      "windowMs": 3000,
+      "steered": [
+        "spike-live-turn"
+      ],
+      "completed": [
+        "spike-live-turn"
+      ],
+      "timedOut": [],
+      "unavailable": null,
+      "retracted": [],
+      "retractUnavailable": []
+    },
+    "expired": null,
+    "restore": {
+      "progressive": false,
+      "active": false,
+      "enabled": false,
+      "draining": false,
+      "capacity": 1,
+      "running": 0,
+      "queued": 0,
+      "openTurns": 0,
+      "tracked": 0,
+      "reserved": 0,
+      "restored": 0,
+      "late": 0,
+      "dispatched": 0,
+      "failed": 0,
+      "interrupted": 0,
+      "cooldownUntil": 0
+    },
+    "version": "0.9.0"
+  },
+  "plan": {
+    "planId": "pause-mvxguywe-1",
+    "status": "paused",
+    "row": {
+      "sessionId": "spike-live-turn",
+      "running": true,
+      "intent": "continue",
+      "epoch": 1,
+      "lastTurn": 1,
+      "owedContinue": true,
+      "wrapUp": "completed"
+    },
+    "wrapUp": {
+      "windowMs": 3000,
+      "steered": [
+        "spike-live-turn"
+      ],
+      "completed": [
+        "spike-live-turn"
+      ],
+      "timedOut": [],
+      "unavailable": null,
+      "retracted": [],
+      "retractUnavailable": []
+    },
+    "canceled": []
+  },
+  "transcript": {
+    "wrapUpPromptPresent": true,
+    "answerAfterPrompt": true,
+    "mockTextOccurrences": 5
+  }
+}

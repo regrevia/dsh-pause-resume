@@ -41,6 +41,11 @@ the plan is written and the sessions are recorded, and the next step is the same
 or restart and let the plan be picked up. When something had to be cancelled, the tooltip says the
 work to continue is saved; when everything wrapped up by itself, it says nothing extra.
 
+If the window closes with the steer still unread, the press takes it back: a pause that did not happen
+must not replay later as a fresh instruction in the restored session. Only that one message is
+removed, only for sessions that timed out, and only while it is still queued; when the queue is not
+readable the report says `retractUnavailable` instead of claiming a clean queue.
+
 ## How resume works
 
 A restore is not a claim that work continued. It is three honest steps per item:
@@ -328,7 +333,12 @@ npm run audit
 npm run smoke:host   # boots a throwaway real Host on a free port and asserts the routes
 npm run smoke:live   # real Host + local mock model stream: pause, SIGKILL, restart, resume once
 npm run smoke:maintenance  # real Host: pause cancels an in-flight compaction, apart from the session turn
+npm run smoke:wrapup # real Host + held model stream: the turn answers the pause as an ordinary completed turn
 ```
+
+The wrap-up path has its own record in `docs/evidence/host-wrapup.json` (a real turn that ends itself
+inside the window, so the plan owes one continuation), next to `docs/evidence/host-live.json` (a
+window that expires, where the press takes its own steer back).
 
 Verification records live in `docs/acceptance-0.6.11.md` (current release: repeated failures stay
 continuable, a pause truncates a running batch, admission ownership, handoff proof, cold/stale goal
