@@ -388,6 +388,9 @@ export function apply(ctx, config = {}) {
     heartbeat,
     epoch,
     bootId: bootId(),
+    // The engine asks the live registry whether a paused session was continued by hand after a Host
+    // restart, so a plan nobody needs any more can close itself instead of leaving the button on ▶.
+    services: ctx,
     graceMs: Number.isFinite(config?.graceMs) ? config.graceMs : 2000,
     gate,
     progressive,

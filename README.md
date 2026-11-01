@@ -46,6 +46,12 @@ must not replay later as a fresh instruction in the restored session. Only that 
 removed, only for sessions that timed out, and only while it is still queued; when the queue is not
 readable the report says `retractUnavailable` instead of claiming a clean queue.
 
+A plan nobody will press again closes itself. After a restart by hand, finishing those sessions
+yourself is enough: each stopped turn is seen living on, moved forward and no longer running, so the
+plan settles the way a completed restore does and the button returns to pause, with no press. Only
+turns the pause itself stopped are considered, and only on positive evidence: a session still working,
+a session list that cannot be read, or an error keeps the plan exactly as it was.
+
 ## How resume works
 
 A restore is not a claim that work continued. It is three honest steps per item:
