@@ -20,6 +20,8 @@ window.__ModuleLoader__.load({
           restart: '跑完这些任务后重启宿主', // ui-copy-ignore
           restartHeld: '重启后继续没放下的内容', // ui-copy-ignore
           expired: (hours) => `${hours >= 48 ? `${Math.round(hours / 24)} 天` : `${Math.round(hours)} 小时`}前中断的工作已归档，不再恢复`, // ui-copy-ignore
+          pausing: '正在收尾', // ui-copy-ignore
+          receipt: '已暂停，继续信息已保存。', // ui-copy-ignore
         }
       : {
           pause: 'Pause', // ui-copy-ignore
@@ -35,6 +37,8 @@ window.__ModuleLoader__.load({
           restart: 'Restart the host when this work is done', // ui-copy-ignore
           restartHeld: 'Restart to continue what was held back', // ui-copy-ignore
           expired: (hours) => `Work interrupted ${hours >= 48 ? `${Math.round(hours / 24)} days` : `${Math.round(hours)} hours`} ago was archived, not restored`, // ui-copy-ignore
+          pausing: 'Wrapping up',
+          receipt: 'Paused. What to continue is saved.',
         }
 
     const HOST_BASE = '/dsh-pause-resume' // ui-copy-ignore
@@ -167,6 +171,23 @@ window.__ModuleLoader__.load({
     // "resume what I paused", and the same glyph for both made the button look like it did one thing.
     const CONTINUE_GLYPH = icon(['M13 8a5 5 0 1 1-1.46-3.54', 'M13 2.8v2.6h-2.6'])
 
+    /**
+     * What the person needs to know after a pause that had to cancel a turn the model did not
+     * finish inside the wrap-up window. This is the consequence, not the mechanism: the work is
+     * still recorded and the next press continues it. A page reads the top-level `wrapUp` first,
+     * because that is the pause result written to disk and re-read after a restart; the copy inside
+     * `outcome` is the one a press just returned. Any state without either returns null, so a page  // ui-copy-ignore
+     * talking to an older release that never sent one renders as before.
+     */
+    function receiptOf(state) {
+      const top = state?.wrapUp
+      const wrapUp = top !== null && top !== undefined && typeof top === 'object' ? top : state?.outcome?.wrapUp
+      if (wrapUp === null || wrapUp === undefined || typeof wrapUp !== 'object') return null
+      const timedOut = Array.isArray(wrapUp.timedOut) ? wrapUp.timedOut.length : 0
+      const completed = Array.isArray(wrapUp.completed) ? wrapUp.completed.length : 0
+      return timedOut > 0 && completed === 0 ? COPY.receipt : null
+    }
+
     /** The one sentence behind the button, in the tooltip only: the button itself stays a glyph. */
     function hintOf(state) {
       if (state.action === 'continue') {
@@ -191,6 +212,12 @@ window.__ModuleLoader__.load({
       // diagnostic and not something to put in front of a person.
       const restart = state.scheduling?.restartRecommended
       if (restart !== null && restart !== undefined && typeof restart.at === 'string') return COPY.restart
+      // Only after the pause is over and a plan is waiting: a busy press or a newer problem keeps its
+      // own sentence, and the receipt never hides one.
+      if (state.action === 'resume') {
+        const receipt = receiptOf(state)
+        if (receipt !== null) return receipt
+      }
       if ((state.attention ?? 0) > 0) {
         return typeof state.focus === 'string' && state.focus !== '' ? `${COPY.attention}: ${state.focus}` : COPY.attention
       }
@@ -328,7 +355,7 @@ window.__ModuleLoader__.load({
           : BUTTON_STYLE
 
       const glyph = busy ? SPIN_GLYPH : action === 'continue' ? CONTINUE_GLYPH : action === 'resume' ? PLAY_GLYPH : PAUSE_GLYPH
-      const label = busy ? COPY.busy : action === 'continue' ? COPY.cont : action === 'resume' ? COPY.resume : COPY.pause
+      const label = busy ? (state.phase === 'pausing' ? COPY.pausing : COPY.busy) : action === 'continue' ? COPY.cont : action === 'resume' ? COPY.resume : COPY.pause
       const hint = hintOf(state)
 
       return h('button', {
@@ -344,7 +371,7 @@ window.__ModuleLoader__.load({
       }, glyph)
     }
 
-    return {
+    const definition = {
       inject: ['slots'], // ui-copy-ignore
       apply(ctx) {
         ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
@@ -355,5 +382,9 @@ window.__ModuleLoader__.load({
         }, Button))
       },
     }
+    // A pure function of the button state, for tests: kept non-enumerable so the loader still walks the
+    // two keys a plugin definition has and nothing else.
+    Object.defineProperty(definition, 'receiptOf', { value: receiptOf })
+    return definition
   },
 })

@@ -201,9 +201,13 @@ function serve(ctx, engine, heartbeat, ledger, options, ready) {
     [
       `${BASE_PATH}/pause`,
       route(async (req, res) => {
-        // A continue batch is work too. Cancel it before the pause reports success, and wait for it
-        // to unwind so no queued row can start after the person was told everything stopped.
+        // A continue batch is work too. Its cancel is issued before the stop, but waiting for it is
+        // not on the critical path: the pause gives the running turn a moment to answer, and the
+        // unwind happens inside that window instead of in front of it. The wait stays bounded, and
+        // a batch that still has not unwound is reported as not drained rather than delaying the
+        // answer until it does.
         const continues = { cancelled: false, drained: true, started: [] }
+        let unwinding = Promise.resolve(true)
         if (ledger.inFlight() === true) {
           continues.cancelled = ledger.cancel() === true
           try {
@@ -211,9 +215,10 @@ function serve(ctx, engine, heartbeat, ledger, options, ready) {
           } catch {
             /* the gate may already be disposed */
           }
-          continues.drained = await ledger.drain(8000)
+          unwinding = Promise.resolve(ledger.drain(2000)).then((drained) => drained === true, () => false)
         }
         const outcome = await engine.pause()
+        continues.drained = await unwinding
         if (continues.cancelled) {
           try {
             continues.started = ledger.startedIds()
@@ -399,6 +404,10 @@ export function apply(ctx, config = {}) {
     // idle for days, and mounting them spends heap on work the person already moved past.
     restoreMaxAgeHours: Number.isFinite(config?.restoreMaxAgeHours) && config.restoreMaxAgeHours > 0 ? config.restoreMaxAgeHours : 72,
     maxRestoreAttempts: Number.isSafeInteger(config?.restoreMaxAttempts) && config.restoreMaxAttempts > 0 ? config.restoreMaxAttempts : 3,
+    // How long a running turn is given to answer the pause itself before it is cancelled. Zero turns
+    // the window off and keeps the immediate cancel for a Host that cannot steer.  // ui-copy-ignore
+    wrapUpMs: Number.isFinite(config?.wrapUpMs) && config.wrapUpMs >= 0 ? config.wrapUpMs : 3000,
+    wrapUpText: typeof config?.wrapUpText === 'string' && config.wrapUpText !== '' ? config.wrapUpText : undefined,
     log,
   })
   engineRef = engine

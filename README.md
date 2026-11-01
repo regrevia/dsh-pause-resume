@@ -1,7 +1,8 @@
 # dsh-pause-resume
 
-One button in the DeepSeek Harness session header. It stops what is running, writes a small plan to
-disk, and after a restart the same button puts that work back.
+One button in the DeepSeek Harness session header. It stops what is running — asking a running turn
+to wrap up first — writes a small plan to disk, and after a restart the same button puts that work
+back.
 
 * ⏸ — work is running. Press to stop it.
 * ▶ — work is stopped, or a previous process left work to restore. Press to restore it.
@@ -16,7 +17,7 @@ a person to look at, the one-sentence tooltip says so and the button still offer
 
 | Work | Pause | Restore |
 | --- | --- | --- |
-| A session with an unfinished turn | turn cancelled, session recorded | session mounted, then one visible continuation message |
+| A session with an unfinished turn | turn wrapped up or cancelled, session recorded | session mounted, then one visible continuation message |
 | A goal that was armed | paused with the revision it had | `goals.resume` with that exact revision; the goal driver continues on its own |
 | A session that only carried that goal | recorded, nothing stopped | mounted; the resumed goal takes over |
 | A running background job | killed and recorded | recorded only: a job is a live process, not replayable, so the continuation message names it and the turn restarts it if the work still needs it |
@@ -29,6 +30,16 @@ person's schedule to pause it is not a trade this plugin makes. A schedule that 
 starts a turn, but the button keeps showing ▶ while a pause plan waits: a pending plan owns the main
 action, so the only honest next step is to finish the restore. The schedule appears in that restore
 summary like any other work started after the press.
+
+## What a pause does
+
+A press does not cancel at once. It first asks the turn that is running to wrap up, and cancels only
+what is still running when the window closes: `wrapUpMs` (default 3000; `0` cancels immediately, as
+every version before 0.9.0 did). A turn that ends inside the window is stopped as completed; the rest
+are cancelled when the time is up, so a pause still never leaves a turn running behind it. Either way
+the plan is written and the sessions are recorded, and the next step is the same: press ▶ to restore,
+or restart and let the plan be picked up. When something had to be cancelled, the tooltip says the
+work to continue is saved; when everything wrapped up by itself, it says nothing extra.
 
 ## How resume works
 
@@ -164,6 +175,7 @@ Configuration (all optional):
 | `restoreMaxCapacity` | `2` | ceiling the health gate may raise the limit to |
 | `restoreCooldownMs` | `40000` | pause after two consecutive failures across sessions |
 | `restoreStartGapMs` | `3000` | spacing between restore starts, plus jitter |
+| `wrapUpMs` | `3000` | how long a running turn has to wrap up before a pause cancels it |
 
 Scope, stated honestly: this governs requests that pass through this Host's model stack. The
 Harness's own restore flow and a subagent that reaches a provider outside this Host are outside the

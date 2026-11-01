@@ -69,7 +69,7 @@ function harness({ calls, answer }) {
     index = 0
     return Button()
   }
-  return { render }
+  return { render, module }
 }
 
 const IDLE = { phase: 'idle', action: 'none', source: null, outstanding: 0, attention: 0, live: {}, counts: {} }
@@ -111,6 +111,52 @@ test('a pause press in flight is not interrupted by pressing pause again', async
   render([{ ...IDLE, action: 'pause' }, false, false]).props.onClick()
   const button = render([{ ...IDLE, phase: 'pausing', action: 'busy' }, false, true])
   assert.equal(button.props['aria-busy'], true)
+  // A pause asks for a wrap-up first; the button says what it is waiting for, not that it is busy.
+  assert.equal(button.props['aria-label'], 'Wrapping up')
   await button.props.onClick()
   assert.deepEqual(calls.map((call) => `${call.method} ${call.url}`), ['POST /dsh-pause-resume/pause'])
+})
+
+const wrapUp = (timedOut, completed) => ({ outcome: { wrapUp: { windowMs: 3000, steered: [], completed, timedOut, unavailable: null } } })
+
+test('a pause that cancelled what did not finish says the work to continue is saved', () => {
+  const { module } = harness({ calls: [], answer: IDLE })
+  assert.equal(module.receiptOf(wrapUp(['s1'], [])), 'Paused. What to continue is saved.')
+})
+
+test('the receipt stays off unless a turn actually had to be cancelled', () => {
+  const { module } = harness({ calls: [], answer: IDLE })
+  // Everything wrapped up inside the window: the plan is complete, nothing was cancelled.
+  assert.equal(module.receiptOf(wrapUp([], ['s1'])), null)
+  assert.equal(module.receiptOf(wrapUp(['s1'], ['s2'])), null)
+  // An older release has no `outcome` at all, and a malformed one must not throw into the render.
+  assert.equal(module.receiptOf(IDLE), null)
+  assert.equal(module.receiptOf({ outcome: { wrapUp: null } }), null)
+  assert.equal(module.receiptOf({ outcome: { wrapUp: { timedOut: 's1' } } }), null)
+  assert.equal(module.receiptOf({}), null)
+})
+
+const wrapUpAtTop = (timedOut, completed) => ({ wrapUp: { windowMs: 3000, steered: [], completed, timedOut, unavailable: null } })
+
+test('a receipt also comes from the top-level wrapUp a restart reports', () => {
+  const { module } = harness({ calls: [], answer: IDLE })
+  // A plan re-read from disk has no `outcome` yet, only the top-level pause result.
+  assert.equal(module.receiptOf(wrapUpAtTop(['s1'], [])), 'Paused. What to continue is saved.')
+  assert.equal(module.receiptOf(wrapUpAtTop([], ['s1'])), null)
+})
+
+test('when the two disagree, the top-level wrapUp is the one that wins', () => {
+  const { module } = harness({ calls: [], answer: IDLE })
+  // Disk says a turn had to be cancelled; a stale `outcome` says everything finished.
+  assert.equal(module.receiptOf({ ...wrapUpAtTop(['s1'], []), ...wrapUp([], ['s1']) }), 'Paused. What to continue is saved.')
+  // And the other way round: disk says nothing was cancelled, so no receipt.
+  assert.equal(module.receiptOf({ ...wrapUpAtTop([], ['s1']), ...wrapUp(['s1'], []) }), null)
+})
+
+test('the receipt is the tooltip once a pause finished, and a continue press still wins', () => {
+  const { render } = harness({ calls: [], answer: IDLE })
+  const paused = { ...IDLE, phase: 'paused', action: 'resume', ...wrapUp(['s1'], []) }
+  assert.equal(render([paused, false, false]).props.title, 'Resume · Paused. What to continue is saved.')
+  const cont = { ...IDLE, action: 'continue', pendingContinue: { count: 2, attention: 0 }, ...wrapUp(['s1'], []) }
+  assert.equal(render([cont, false, false]).props.title, 'Continue unfinished work · 2 tasks stopped, press to continue')
 })

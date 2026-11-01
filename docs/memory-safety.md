@@ -43,6 +43,9 @@ FATAL ERROR: MarkCompactCollector: young object promotion failed
    就不再挂载任何会话。没轮到的会话不加载转录（加载它正是闸门要避免的开销），
    只写入 `deferred` 记录，留给下次启动或手动恢复。
 
+暂停前的收尾窗口（`wrapUpMs`，默认 3000）只改按下暂停那一下怎么停，不动上面五条：恢复顺序、大会话
+串行、每步前的堆余量闸门都照旧，按下之后要放回来的仍是同一份计划。
+
 ```
 启动 / 重启
    │
