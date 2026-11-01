@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-10-28T15:51:34.707Z",
+  "generatedAt": "2026-11-01T05:03:35.278Z",
   "kind": "host-live",
   "plugin": {
     "name": "dsh-pause-resume",
-    "version": "0.6.11"
+    "version": "0.9.0"
   },
   "host": {
     "kind": "isolated-electron",
@@ -14,7 +14,7 @@
     "profile": "live",
     "baseProfile": "web",
     "note": "throwaway DSH_HOME and OS-assigned port; the real ~/.dsh profile is not read or written",
-    "port": "http://127.0.0.1:59441"
+    "port": "http://127.0.0.1:65283"
   },
   "mock": {
     "kind": "acceptance/mock-llm.mjs",
@@ -35,15 +35,15 @@
         "lastRole": "user",
         "lastText": "Generate the session title from this JSON array of human messages:\n[{\"seq\":8,\"text\":\"live turn for crash-turn-backfill\"}]",
         "held": false,
-        "finishedAt": "2026-10-28T15:51:36.087Z"
+        "finishedAt": "2026-11-01T05:03:39.344Z"
       },
       {
         "n": 3,
-        "messages": 8,
+        "messages": 9,
         "lastRole": "user",
-        "lastText": "Time sampled while preparing turn 2, step 1: 2026-10-28T23:51:36+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
+        "lastText": "Time sampled while preparing turn 2, step 1: 2026-11-01T13:03:42+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
         "held": false,
-        "finishedAt": "2026-10-28T15:51:36.952Z"
+        "finishedAt": "2026-11-01T05:03:43.223Z"
       }
     ]
   },
@@ -54,39 +54,39 @@
   "steps": [
     {
       "step": "profile-created",
-      "at": "2026-10-28T15:51:34.808Z",
+      "at": "2026-11-01T05:03:35.738Z",
       "ok": true,
       "code": 0,
       "profile": "live",
       "from": "web",
-      "stderr": ""
+      "stderr": "[1101/130335.491403:ERROR:electron/shell/app/node_main.cc:154] Node.js environment variables are disabled because this process is invoked by other apps.\n"
     },
     {
       "step": "plugin-installed",
-      "at": "2026-10-28T15:51:35.160Z",
+      "at": "2026-11-01T05:03:38.208Z",
       "ok": true,
       "code": 0,
       "plugin": "<repo>",
-      "stderr": ""
+      "stderr": "[1101/130335.787268:ERROR:electron/shell/app/node_main.cc:154] Node.js environment variables are disabled because this process is invoked by other apps.\n"
     },
     {
       "step": "model-overridden",
-      "at": "2026-10-28T15:51:35.164Z",
+      "at": "2026-11-01T05:03:38.214Z",
       "ok": true,
       "provider": "mock",
       "api": "openai-completions",
-      "baseURL": "http://127.0.0.1:59432/v1"
+      "baseURL": "http://127.0.0.1:65272/v1"
     },
     {
       "step": "host-ready",
-      "at": "2026-10-28T15:51:35.714Z",
+      "at": "2026-11-01T05:03:38.953Z",
       "ok": true,
-      "url": "http://127.0.0.1:59433",
+      "url": "http://127.0.0.1:65273",
       "boot": 1
     },
     {
       "step": "live-turn-running",
-      "at": "2026-10-28T15:51:35.871Z",
+      "at": "2026-11-01T05:03:39.111Z",
       "ok": true,
       "phase": "idle",
       "liveSessions": 1,
@@ -99,7 +99,7 @@
     },
     {
       "step": "paused-with-plan",
-      "at": "2026-10-28T15:51:35.952Z",
+      "at": "2026-11-01T05:03:42.218Z",
       "ok": true,
       "status": 200,
       "outcome": {
@@ -110,6 +110,17 @@
           "jobs": 0
         },
         "outstanding": 1,
+        "wrapUp": {
+          "windowMs": 3000,
+          "steered": [
+            "spike-live-turn"
+          ],
+          "completed": [],
+          "timedOut": [
+            "spike-live-turn"
+          ],
+          "unavailable": null
+        },
         "continues": {
           "cancelled": false,
           "drained": true,
@@ -126,7 +137,7 @@
     },
     {
       "step": "crashed",
-      "at": "2026-10-28T15:51:35.963Z",
+      "at": "2026-11-01T05:03:42.241Z",
       "ok": true,
       "signal": "SIGKILL",
       "code": null,
@@ -134,14 +145,14 @@
     },
     {
       "step": "host-ready",
-      "at": "2026-10-28T15:51:36.521Z",
+      "at": "2026-11-01T05:03:42.766Z",
       "ok": true,
-      "url": "http://127.0.0.1:59441",
+      "url": "http://127.0.0.1:65283",
       "boot": 2
     },
     {
       "step": "plan-survived-crash",
-      "at": "2026-10-28T15:51:36.563Z",
+      "at": "2026-11-01T05:03:42.809Z",
       "ok": true,
       "phase": "paused",
       "outstanding": 1,
@@ -153,13 +164,13 @@
     },
     {
       "step": "resumed",
-      "at": "2026-10-28T15:51:36.636Z",
+      "at": "2026-11-01T05:03:42.902Z",
       "ok": true,
       "status": 200,
       "outcome": {
         "status": "resumed",
         "summary": {
-          "planId": "pause-mvsal3gg-1",
+          "planId": "pause-mvxd78mg-1",
           "source": "pause",
           "restored": [
             "session spike-live-turn"
@@ -179,18 +190,18 @@
           ],
           "jobs": 0,
           "jobsStopped": [],
-          "at": "2026-10-28T15:51:36.564Z"
+          "at": "2026-11-01T05:03:42.810Z"
         }
       }
     },
     {
       "step": "continuation-request",
-      "at": "2026-10-28T15:51:37.092Z",
+      "at": "2026-11-01T05:03:43.365Z",
       "ok": true,
       "afterResume": {
         "n": 3,
-        "messages": 8,
-        "lastText": "Time sampled while preparing turn 2, step 1: 2026-10-28T23:51:36+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
+        "messages": 9,
+        "lastText": "Time sampled while preparing turn 2, step 1: 2026-11-01T13:03:42+08:00[Asia/Shanghai]\nBrowser time zone for this request: unavailable. Ask the user to clarify o",
         "carriesTurnText": true
       },
       "beforeCrash": {
@@ -202,7 +213,7 @@
     },
     {
       "step": "exactly-once",
-      "at": "2026-10-28T15:51:40.094Z",
+      "at": "2026-11-01T05:03:46.368Z",
       "ok": true,
       "turnRequests": 2,
       "totalRequests": 3,
@@ -210,10 +221,10 @@
     },
     {
       "step": "restore-record",
-      "at": "2026-10-28T15:51:40.095Z",
+      "at": "2026-11-01T05:03:46.369Z",
       "ok": true,
       "files": [
-        "pause-mvsal3gg-1.json"
+        "pause-mvxd78mg-1.json"
       ],
       "row": {
         "sessionId": "spike-live-turn",
@@ -221,7 +232,11 @@
         "intent": "continue",
         "epoch": 1,
         "lastTurn": 2,
-        "continuedTurn": 2
+        "owedContinue": true,
+        "wrapUp": "cancelled",
+        "continuedTurn": 2,
+        "restoreDoneAt": "2026-11-01T05:03:42.858Z",
+        "restoreDoneBoot": "34443-mvxd7ba9"
       },
       "summaryRow": {
         "key": "s:spike-live-turn",
@@ -233,10 +248,10 @@
     },
     {
       "step": "model-text-in-session",
-      "at": "2026-10-28T15:51:40.097Z",
+      "at": "2026-11-01T05:03:46.373Z",
       "ok": true,
       "sessionId": "spike-live-turn",
-      "mockTextOccurrences": 2
+      "mockTextOccurrences": 3
     }
   ],
   "live": {
@@ -257,6 +272,17 @@
           "jobs": 0
         },
         "outstanding": 1,
+        "wrapUp": {
+          "windowMs": 3000,
+          "steered": [
+            "spike-live-turn"
+          ],
+          "completed": [],
+          "timedOut": [
+            "spike-live-turn"
+          ],
+          "unavailable": null
+        },
         "continues": {
           "cancelled": false,
           "drained": true,
@@ -281,7 +307,7 @@
     "resume": {
       "status": "resumed",
       "summary": {
-        "planId": "pause-mvsal3gg-1",
+        "planId": "pause-mvxd78mg-1",
         "source": "pause",
         "restored": [
           "session spike-live-turn"
@@ -301,12 +327,12 @@
         ],
         "jobs": 0,
         "jobsStopped": [],
-        "at": "2026-10-28T15:51:36.564Z"
+        "at": "2026-11-01T05:03:42.810Z"
       }
     },
     "continuation": {
       "request": 3,
-      "messages": 8,
+      "messages": 9,
       "carriesTurnText": true
     },
     "plan": {
@@ -317,11 +343,15 @@
         "intent": "continue",
         "epoch": 1,
         "lastTurn": 2,
-        "continuedTurn": 2
+        "owedContinue": true,
+        "wrapUp": "cancelled",
+        "continuedTurn": 2,
+        "restoreDoneAt": "2026-11-01T05:03:42.858Z",
+        "restoreDoneBoot": "34443-mvxd7ba9"
       }
     },
     "duplicateContinuation": false
   },
   "verdict": "pass",
-  "finishedAt": "2026-10-28T15:51:40.141Z"
+  "finishedAt": "2026-11-01T05:03:46.426Z"
 }
