@@ -27,8 +27,12 @@ function harness({ live = { readable: true, sessions: [], goals: [], jobs: [] },
     sessionWeight: async () => ({ bytes: 1024 * 1024, file: null }),
     stop: async (current) => {
       calls.push(['stop', current.sessions.map((row) => row.sessionId)])
+      const canceledIds = (current.sessions ?? []).map((row) => row.sessionId)
+      // A probe that reports a cancellation has stopped that turn: the live reading after the stop
+      // must agree, or the engine is right to call the pause partial.
+      live.sessions = (live.sessions ?? []).map((row) => (canceledIds.includes(row?.sessionId) ? { ...row, running: false } : row))
       return {
-        canceled: (current.sessions ?? []).map((row) => row.sessionId),
+        canceled: canceledIds,
         unknown: [], pausedGoals: [], goalErrors: [], killedJobs: [], jobErrors: [], stillRunning: [],
         sessions: (current.sessions ?? []).map((row) => ({ sessionId: row.sessionId, lastTurn: (row.lastTurn ?? 0) + 1 })),
         ...stop,

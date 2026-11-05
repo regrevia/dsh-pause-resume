@@ -71,10 +71,15 @@ function fakeProbe(live = { sessions: [], goals: [], jobs: [], readable: true },
     sessionWeight: async () => ({ bytes: 1024 * 1024, file: null }),
     stop: async (current) => {
       calls.push(['stop', current.sessions.length])
-      return {
+      const outcome = {
         canceled: [], unknown: [], pausedGoals: [], goalErrors: [], killedJobs: [], jobErrors: [], stillRunning: [],
         ...stopOutcome,
       }
+      // The probe models the world it reports on: a session it says it cancelled is not running
+      // afterwards, unless a fixture deliberately keeps it alive to test a stop that lies.
+      const canceled = new Set((Array.isArray(outcome.canceled) ? outcome.canceled : []).map((entry) => (typeof entry === 'string' ? entry : entry?.sessionId)))
+      live.sessions = (live.sessions ?? []).map((row) => (canceled.has(row?.sessionId) ? { ...row, running: false } : row))
+      return outcome
     },
     restoreSession: async (session) => {
       calls.push(['session', session.sessionId, session.running])
@@ -118,6 +123,21 @@ test('describe() is idle and offers nothing when there is no work and no plan', 
   assert.equal(state.action, 'none')
   assert.equal(state.complete, null)
   assert.equal(state.error, null)
+})
+
+test('a session the stop did not actually stop keeps the pause from calling itself clean', async () => {
+  // The probe's report is its own belief; the session list is the fact. A pause that says `paused`
+  // while a turn is still live leaves the person with a stopped label on work that keeps running.
+  const live = { sessions: [{ sessionId: 's1', running: true, lastTurn: 3 }], goals: [], jobs: [], readable: true }
+  const base = fakeProbe(live, { canceled: ['s1'] })
+  // A stop that reports a cancellation the session list does not confirm.
+  const probe = { ...base, live: () => ({ sessions: [{ sessionId: 's1', running: true, lastTurn: 3 }], goals: [], jobs: [], readable: true }) }
+  const { engine, store } = engineFor({ probe })
+  const result = await engine.pause({})
+  assert.equal(result.status, 'partial', 'a turn still running is not a clean pause')
+  const plan = store.state.plan
+  assert.equal(plan.status, 'partial')
+  assert.ok(plan.attention.some((row) => row.kind === 'session' && row.id === 's1'), 'the session that kept running is named')
 })
 
 test('describe() offers a pause for running jobs even with no session turn open', () => {
@@ -563,10 +583,14 @@ test('a partial pause retries the same plan instead of starting a second one', a
   const planId = store.state.plan.planId
   assert.deepEqual(store.state.plan.attention, [{ kind: 'session', id: 's1', detail: 'still running' }])
   // The stubborn turn is still there on the next press, and this time it accepts the cancel.
-  probe.stop = async () => ({
-    canceled: ['s1'], unknown: [], pausedGoals: [], goalErrors: [], killedJobs: [], jobErrors: [], stillRunning: [],
-    sessions: [{ sessionId: 's1', lastTurn: 2 }],
-  })
+  probe.stop = async () => {
+    // This time the cancel is confirmed by the session list, which is what a real stop looks like.
+    live.sessions = [{ sessionId: 's1', running: false, lastTurn: 2 }]
+    return {
+      canceled: ['s1'], unknown: [], pausedGoals: [], goalErrors: [], killedJobs: [], jobErrors: [], stillRunning: [],
+      sessions: [{ sessionId: 's1', lastTurn: 2 }],
+    }
+  }
   const second = await engine.pause()
   assert.equal(second.status, 'paused')
   assert.equal(store.state.plan.planId, planId)

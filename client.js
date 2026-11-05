@@ -4,42 +4,63 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
 
-    const zh = /^zh/i.test(navigator.language || '')
-    const COPY = zh
-      ? {
-          pause: '暂停', // ui-copy-ignore
-          resume: '继续', // ui-copy-ignore
-          busy: '正在处理', // ui-copy-ignore
-          error: '上次操作没有完成', // ui-copy-ignore
-          partial: '部分内容未能恢复，可以再按一次', // ui-copy-ignore
-          stopped: '上次暂停的内容还没有恢复', // ui-copy-ignore
-          attention: '有内容需要你处理',
-          cont: '继续未完成的任务', // ui-copy-ignore
-          contCount: (n) => `${n} 个任务中断，点击继续`,
-          contAttention: (n) => `${n} 个任务上次没有恢复`,
-          restart: '跑完这些任务后重启宿主', // ui-copy-ignore
-          restartHeld: '重启后继续没放下的内容', // ui-copy-ignore
-          expired: (hours) => `${hours >= 48 ? `${Math.round(hours / 24)} 天` : `${Math.round(hours)} 小时`}前中断的工作已归档，不再恢复`, // ui-copy-ignore
-          pausing: '正在收尾', // ui-copy-ignore
-          receipt: '已暂停，继续信息已保存。', // ui-copy-ignore
-        }
-      : {
-          pause: 'Pause', // ui-copy-ignore
-          resume: 'Resume', // ui-copy-ignore
-          busy: 'Working', // ui-copy-ignore
-          error: 'The last action did not finish',
-          partial: 'Some items were not restored; press again to retry',
-          stopped: 'Work is still stopped',
-          attention: 'Some items need a look',
-          cont: 'Continue unfinished work',
-          contCount: (n) => `${n} ${n === 1 ? 'task stopped' : 'tasks stopped'}, press to continue`,
-          contAttention: (n) => `${n} ${n === 1 ? 'task did' : 'tasks did'} not resume last time`,
-          restart: 'Restart the host when this work is done', // ui-copy-ignore
-          restartHeld: 'Restart to continue what was held back', // ui-copy-ignore
-          expired: (hours) => `Work interrupted ${hours >= 48 ? `${Math.round(hours / 24)} days` : `${Math.round(hours)} hours`} ago was archived, not restored`, // ui-copy-ignore
-          pausing: 'Wrapping up',
-          receipt: 'Paused. What to continue is saved.',
-        }
+    const NS = 'pause-resume' // ui-copy-ignore
+    /**
+     * Two dictionaries, so the button speaks the language the app is in rather than the one
+     * Electron happened to launch the renderer with.
+     */
+    const DICT = { // ui-copy-ignore
+      zh: { // ui-copy-ignore
+        pause: '暂停', // ui-copy-ignore
+        resume: '继续', // ui-copy-ignore
+        busy: '正在处理', // ui-copy-ignore
+        error: '上次操作没有完成', // ui-copy-ignore
+        partial: '部分内容未能恢复，可以再按一次', // ui-copy-ignore
+        stopped: '上次暂停的内容还没有恢复', // ui-copy-ignore
+        attention: '有内容需要你处理', // ui-copy-ignore
+        cont: '继续未完成的任务', // ui-copy-ignore
+        contCount: '{n} 个任务中断，点击继续', // ui-copy-ignore
+        contAttention: '{n} 个任务上次没有恢复', // ui-copy-ignore
+        restart: '跑完这些任务后重启', // ui-copy-ignore
+        restartHeld: '重启后继续没放下的内容', // ui-copy-ignore
+        expiredDays: '{n} 天前中断的工作已归档，不再恢复', // ui-copy-ignore
+        expiredHours: '{n} 小时前中断的工作已归档，不再恢复', // ui-copy-ignore
+        pausing: '正在收尾', // ui-copy-ignore
+        receipt: '已暂停，继续信息已保存。', // ui-copy-ignore
+        tooLarge: '这些会话太大，自动恢复会占满内存，请自己打开', // ui-copy-ignore
+      },
+      en: { // ui-copy-ignore
+        pause: 'Pause', // ui-copy-ignore
+        resume: 'Resume', // ui-copy-ignore
+        busy: 'Working', // ui-copy-ignore
+        error: 'The last action did not finish', // ui-copy-ignore
+        partial: 'Some items were not restored; press again to retry', // ui-copy-ignore
+        stopped: 'Work is still stopped', // ui-copy-ignore
+        attention: 'Some items need a look', // ui-copy-ignore
+        cont: 'Continue unfinished work', // ui-copy-ignore
+        contCount: '{n} tasks stopped, press to continue', // ui-copy-ignore
+        contAttention: '{n} tasks did not resume last time', // ui-copy-ignore
+        restart: 'Restart when this work is done', // ui-copy-ignore
+        restartHeld: 'Restart to continue what was held back', // ui-copy-ignore
+        expiredDays: 'Work interrupted {n} days ago was archived, not restored', // ui-copy-ignore
+        expiredHours: 'Work interrupted {n} hours ago was archived, not restored', // ui-copy-ignore
+        pausing: 'Wrapping up', // ui-copy-ignore
+        receipt: 'Paused. What to continue is saved.', // ui-copy-ignore
+        tooLarge: 'Too large to restore automatically; open it yourself', // ui-copy-ignore
+      },
+    }
+    /** Until the dictionary is registered, or on a page that offers no locale service. */
+    function localTranslate(lang) {
+      const table = /^zh/i.test(lang || '') || /^zh/i.test((typeof navigator !== 'undefined' && navigator.language) || '') ? DICT.zh : DICT.en
+      return (key, params) => {
+        const template = table[key] ?? DICT.en[key] ?? key
+        if (params === undefined) return template
+        return String(template).replace(/\{(\w+)\}/g, (match, name) => (name in params ? String(params[name]) : match))
+      }
+    }
+    let translate = localTranslate('') // ui-copy-ignore
+    /** Current-language string; read at call time so a language switch lands on the next poll. */
+    const t = (key, params) => translate(key, params)
 
     const HOST_BASE = '/dsh-pause-resume' // ui-copy-ignore
     const POLL_MS = 2000 // ui-copy-ignore
@@ -152,10 +173,11 @@ window.__ModuleLoader__.load({
       position: 'relative', // ui-copy-ignore
     }
 
-    // Small evidence beside the glyph, never a second control: it explains a state the icon cannot.
-    const NOTE_STYLE = {
-      fontSize: 12, lineHeight: 1.3, whiteSpace: 'nowrap', marginInlineEnd: 6, // ui-copy-ignore
-      color: 'var(--dsh-color-text-secondary, rgba(127,127,127,0.9))', pointerEvents: 'none', // ui-copy-ignore
+    // The whole reason lives in the tooltip; a state the glyph cannot show gets a dot, which costs
+    // no width: the header row must not shift when the button changes state.
+    const DOT_STYLE = {
+      position: 'absolute', top: 3, insetInlineEnd: 3, width: 6, height: 6, borderRadius: 3, // ui-copy-ignore
+      background: 'var(--dsh-color-status-warning, #d99a2b)', // ui-copy-ignore
     }
     const SPIN_STYLE = { display: 'inline-flex', animation: 'dsh-pr-spin 900ms linear infinite' } // ui-copy-ignore
 
@@ -190,20 +212,7 @@ window.__ModuleLoader__.load({
       if (wrapUp === null || wrapUp === undefined || typeof wrapUp !== 'object') return null
       const timedOut = Array.isArray(wrapUp.timedOut) ? wrapUp.timedOut.length : 0
       const completed = Array.isArray(wrapUp.completed) ? wrapUp.completed.length : 0
-      return timedOut > 0 && completed === 0 ? COPY.receipt : null
-    }
-
-    /**
-     * The one state the button cannot express on its own: the press measured the room, every row was
-     * refused for memory, and the same keypress will measure the same heap again. The glyph stays a
-     * play triangle because nothing is running, so the sentence has to sit next to it — a tooltip
-     * only shows on hover, and a press that looks like it did nothing is the complaint this answers.
-     */
-    function blockedNoteOf(state) {
-      if (state === null || state === undefined || typeof state !== 'object') return ''
-      const held = Array.isArray(state?.scheduling?.deferred) ? state.scheduling.deferred.length : 0
-      if (held > 0 && (state.error === 'restore-blocked-heap' || typeof state?.scheduling?.restartRecommended?.at === 'string')) return COPY.restartHeld
-      return ''
+      return timedOut > 0 && completed === 0 ? t('receipt') : null
     }
 
     /** The one sentence behind the button, in the tooltip only: the button itself stays a glyph. */
@@ -212,24 +221,31 @@ window.__ModuleLoader__.load({
         const pending = state.pendingContinue ?? {}
         const count = Number.isInteger(pending.count) && pending.count > 0 ? pending.count : 0
         const failed = Number.isInteger(pending.attention) && pending.attention > 0 ? pending.attention : 0
-        const base = count > 0 ? COPY.contCount(count) : COPY.cont
-        return failed > 0 ? `${base} · ${COPY.contAttention(failed)}` : base
+        const base = count > 0 ? t('contCount', { n: count }) : t('cont')
+        return failed > 0 ? `${base} · ${t('contAttention', { n: failed })}` : base
       }
       const focus = typeof state.focus === 'string' && state.focus !== '' ? state.focus : ''
       const expired = state.expired
-      if (expired !== null && expired !== undefined && typeof expired === 'object' && Number.isFinite(expired.ageHours)) return COPY.expired(expired.ageHours)
+      if (expired !== null && expired !== undefined && typeof expired === 'object' && Number.isFinite(expired.ageHours)) {
+        const hours = expired.ageHours
+        return hours >= 48 ? t('expiredDays', { n: Math.round(hours / 24) }) : t('expiredHours', { n: Math.round(hours) })
+      }
+      // A transcript past the size the process can hydrate is not waiting for a restart: the same
+      // file would be read again. The only next step is opening it by hand, so say that instead of
+      // the generic partial sentence.
+      if ((state.scheduling?.needsHand ?? 0) > 0) return t('tooLarge')
       // Rows this process held back are still owed work, and pressing again cannot mount them: the
       // same heap is still there. "Press again" would be a loop, so the restart is the one next step.
       const held = Array.isArray(state.scheduling?.deferred) ? state.scheduling.deferred.length : 0
       const advice = state.scheduling?.restartRecommended
-      if (held > 0 && advice !== null && advice !== undefined && typeof advice.at === 'string') return COPY.restartHeld
-      if (state.error === 'restore-partial') return focus === '' ? COPY.partial : `${COPY.partial}: ${focus}`
-      if (state.error !== null && state.error !== undefined) return focus === '' ? COPY.error : `${COPY.error}: ${focus}`
+      if (held > 0 && advice !== null && advice !== undefined && typeof advice.at === 'string') return t('restartHeld')
+      if (state.error === 'restore-partial') return focus === '' ? t('partial') : `${t('partial')}: ${focus}`
+      if (state.error !== null && state.error !== undefined) return focus === '' ? t('error') : `${t('error')}: ${focus}`
       // The one consequence the person has to act on: this process has already mounted everything it
       // safely can, and the rest lands after a restart. It replaces a row's raw reason, which is a
       // diagnostic and not something to put in front of a person.
       const restart = state.scheduling?.restartRecommended
-      if (restart !== null && restart !== undefined && typeof restart.at === 'string') return COPY.restart
+      if (restart !== null && restart !== undefined && typeof restart.at === 'string') return t('restart')
       // Only after the pause is over and a plan is waiting: a busy press or a newer problem keeps its
       // own sentence, and the receipt never hides one.
       if (state.action === 'resume') {
@@ -237,9 +253,9 @@ window.__ModuleLoader__.load({
         if (receipt !== null) return receipt
       }
       if ((state.attention ?? 0) > 0) {
-        return typeof state.focus === 'string' && state.focus !== '' ? `${COPY.attention}: ${state.focus}` : COPY.attention
+        return typeof state.focus === 'string' && state.focus !== '' ? `${t('attention')}: ${state.focus}` : t('attention')
       }
-      if ((state.outstanding ?? 0) > 0) return COPY.stopped
+      if ((state.outstanding ?? 0) > 0) return t('stopped')
       return ''
     }
 
@@ -372,12 +388,14 @@ window.__ModuleLoader__.load({
           ? { ...BUTTON_STYLE, opacity: 1, background: 'var(--dsh-color-surface-hover, rgba(127,127,127,0.14))' }
           : BUTTON_STYLE
 
-      const note = busy ? '' : blockedNoteOf(state)
+      // A press the heap refused is the one state that needs saying without a word: the glyph stays
+      // the play triangle, so a dot marks it and the tooltip carries the sentence.
+      const held = busy === false && heldOf(state)
       const glyph = busy ? SPIN_GLYPH : action === 'continue' ? CONTINUE_GLYPH : action === 'resume' ? PLAY_GLYPH : PAUSE_GLYPH
-      const label = busy ? (state.phase === 'pausing' ? COPY.pausing : COPY.busy) : action === 'continue' ? COPY.cont : action === 'resume' ? COPY.resume : COPY.pause
+      const label = busy ? (state.phase === 'pausing' ? t('pausing') : t('busy')) : action === 'continue' ? t('cont') : action === 'resume' ? t('resume') : t('pause')
       const hint = hintOf(state)
 
-      return h('button', {
+      const control = h('button', {
         type: 'button', // ui-copy-ignore
         style,
         onClick,
@@ -387,24 +405,51 @@ window.__ModuleLoader__.load({
         title: hint === '' ? label : `${label} · ${hint}`,
         onMouseEnter: () => setHover(true),
         onMouseLeave: () => setHover(false),
-      }, note === '' ? [glyph] : [h('span', { key: 'note', style: NOTE_STYLE }, note), glyph])
+      }, held ? [glyph, h('span', { key: 'held', style: DOT_STYLE, 'aria-hidden': true })] : glyph)
+      return control
+    }
+
+    /**
+     * Rows this process held back for memory: pressing again re-measures the same heap, so the button
+     * has to say so before the press instead of after it.
+     */
+    function heldOf(state) {
+      if (state === null || state === undefined || typeof state !== 'object') return false
+      if (state.error === 'restore-blocked-heap') return true
+      // A row that may never be mounted automatically is still a press that must show a result.
+      if ((state?.scheduling?.needsHand ?? 0) > 0) return true
+      const held = Array.isArray(state?.scheduling?.deferred) ? state.scheduling.deferred.length : 0
+      return held > 0 && typeof state?.scheduling?.restartRecommended?.at === 'string'
     }
 
     const definition = {
-      inject: ['slots'], // ui-copy-ignore
+      inject: ['slots', 'locale'], // ui-copy-ignore
       apply(ctx) {
+        // Registered in the app's own locale service when it is there, so the copy follows the
+        // language the person chose rather than the one the renderer was launched with.
+        try {
+          const locale = typeof ctx.get === 'function' ? ctx.get('locale') : null
+          const active = typeof locale?.snapshot?.active === 'string' ? locale.snapshot.active : ''
+          if (active !== '') translate = localTranslate(active)
+          if (locale !== null && locale !== undefined && typeof locale.register === 'function') {
+            locale.register(NS, { zh: DICT.zh, en: DICT.en })
+            const bound = locale.bind(NS)
+            translate = (key, params) => bound(key, params)
+          }
+        } catch {}
         ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
           name: 'conversation.session.header.utilities',
           id: 'dsh-pause-resume', // ui-copy-ignore
           order: 31, // ui-copy-ignore
-          label: () => COPY.pause, // ui-copy-ignore
+          label: () => t('pause'), // ui-copy-ignore
         }, Button))
       },
     }
     // A pure function of the button state, for tests: kept non-enumerable so the loader still walks the
     // two keys a plugin definition has and nothing else.
     Object.defineProperty(definition, 'receiptOf', { value: receiptOf })
-    Object.defineProperty(definition, 'blockedNoteOf', { value: blockedNoteOf })
+    Object.defineProperty(definition, 'heldOf', { value: heldOf })
+    Object.defineProperty(definition, 'setLanguage', { value: (lang) => { translate = localTranslate(lang) } })
     return definition
   },
 })

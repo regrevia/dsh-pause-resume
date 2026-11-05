@@ -161,7 +161,25 @@ test('the receipt is the tooltip once a pause finished, and a continue press sti
   assert.equal(render([cont, false, false]).props.title, 'Continue unfinished work · 2 tasks stopped, press to continue')
 })
 
-test('a restore the heap refused says on the page why pressing again will not help', () => {
+test('a transcript too large to restore automatically asks to be opened by hand', () => {
+  const { render, module } = harness({ calls: [], answer: IDLE })
+  const manual = {
+    ...IDLE,
+    action: 'resume',
+    error: 'restore-partial',
+    scheduling: { deferred: [{ sessionId: 'a', manual: true, reason: 'transcript is too large to restore here' }], needsHand: 1, restartRecommended: null },
+  }
+  // Pressing again re-reads the same file and dies the same way; a restart mounts it again. The mark
+  // is the only way the button can say that, because the header has room for one 28px glyph.
+  assert.equal(module.heldOf(manual), true, 'a session waiting to be opened by hand is marked')
+  assert.equal(module.heldOf({ ...manual, scheduling: { deferred: [], needsHand: 0, restartRecommended: null } }), false)
+  const held = render([manual, false, false])
+  assert.equal(held.props.style.width, 28)
+  assert.equal(JSON.stringify(held.children).includes('borderRadius'), true, 'the mark is a dot')
+  assert.ok(held.props.title.includes('Too large to restore automatically'), 'the tooltip says why pressing cannot help')
+})
+
+test('a restore the heap refused is marked on the button, never beside it', () => {
   const { render, module } = harness({ calls: [], answer: IDLE })
   const blocked = {
     ...IDLE,
@@ -169,9 +187,23 @@ test('a restore the heap refused says on the page why pressing again will not he
     error: 'restore-blocked-heap',
     scheduling: { deferred: [{ sessionId: 'a' }], restartRecommended: { at: '2026-01-01T00:00:00.000Z', usedMB: 3900, limitMB: 4000 } },
   }
-  assert.equal(module.blockedNoteOf(blocked), 'Restart to continue what was held back')
-  assert.equal(module.blockedNoteOf(IDLE), '')
-  const button = render([blocked, false, false])
-  assert.equal(button.props['aria-label'], 'Resume')
-  assert.ok(JSON.stringify(button.children).includes('Restart to continue what was held back'), 'the sentence is on the page, not only in the tooltip')
+  // The header gives a control 28px: no sentence may be painted there or next to it, or the row
+  // shifts and the button covers its neighbours. A dot marks the state; the tooltip carries the words.
+  assert.equal(module.heldOf(blocked), true)
+  assert.equal(module.heldOf(IDLE), false)
+  const held = render([blocked, false, false])
+  assert.equal(held.type, 'button', 'the header holds one control and nothing beside it')
+  assert.equal(held.props.style.width, 28, 'the control keeps its box, so the row cannot move')
+  assert.equal(held.props['aria-label'], 'Resume', 'the control is still the control')
+  const box = held.children[0]
+  assert.equal(Array.isArray(box), true, 'the button holds its glyph and mark together')
+  assert.equal(box.length, 2, 'the glyph and the mark, no text')
+  assert.equal(JSON.stringify(box[0]).includes('svg'), true, 'the glyph keeps its own box')
+  assert.equal(box[1].props.style.borderRadius, 3, 'the mark is a dot, not a label')
+  assert.equal(typeof box[1].props.children, 'undefined', 'the dot has no words in it')
+  assert.ok(held.props.title.includes('Restart to continue what was held back'), 'the full reason is one hover away')
+  // Nothing held back: the button alone, with no mark.
+  const plain = render([IDLE, false, false])
+  assert.equal(plain.type, 'button')
+  assert.equal(JSON.stringify(plain.children).includes('borderRadius'), false, 'no mark without a held row')
 })

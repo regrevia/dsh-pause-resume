@@ -110,11 +110,11 @@ test('five small transcripts do not open five turns in one press', async () => {
 })
 
 test('a row held for memory records what it needs and comes back when the heap has it', async () => {
-  const probe = probeFor({ weights: { big: 200 * MB } })
+  const probe = probeFor({ weights: { big: 40 * MB } })
   const store = fakeStore({ plan: planOf([{ sessionId: 'big' }]) })
   const engine = createEngine({
     store, probe, bootId: 'b1', now: () => 1, log: () => {},
-    heapStats: () => ({ usedMB: 2500, limitMB: 4000 }),
+    heapStats: () => ({ usedMB: 3500, limitMB: 4000 }),
     restoreHeapReserveMB: 500,
     restoreSettleMs: 30000,
   })
@@ -123,7 +123,7 @@ test('a row held for memory records what it needs and comes back when the heap h
   assert.deepEqual(probe.calls.filter(([kind]) => kind === 'session'), [], 'nothing is mounted while the room is short')
   const held = store.state.plan.restore.deferred[0]
   assert.equal(held.sessionId, 'big')
-  assert.equal(held.needMB, 1200, 'the hold carries the estimate it was refused on')
+  assert.equal(held.needMB, 240, 'the hold carries the estimate it was refused on')
   assert.equal(store.state.plan.restore.rounds, 1, 'the refused round is recorded, so the plan does not look untouched')
   assert.equal(store.state.plan.restore.attempts, 0, 'a hold is not a failure')
 
@@ -155,9 +155,9 @@ test('a turn that is still running from an earlier round keeps its slot', async 
 })
 
 test('the engine comes back for a row held for memory once the heap drains', async () => {
-  const probe = probeFor({ weights: { big: 200 * MB } })
+  const probe = probeFor({ weights: { big: 40 * MB } })
   const store = fakeStore({ plan: planOf([{ sessionId: 'big' }]) })
-  const heap = { usedMB: 2500, limitMB: 4000 }
+  const heap = { usedMB: 3500, limitMB: 4000 }
   const engine = createEngine({
     store, probe, bootId: 'b1', now: () => Date.now(), log: () => {},
     heapStats: () => ({ ...heap }),

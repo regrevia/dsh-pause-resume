@@ -233,14 +233,14 @@ test('a transcript whose size cannot be read is never admitted two at a time', a
 
 test('a transcript larger than the room left is held back before it is read', async () => {
   const MB = 1048576
-  const probe = pacingProbe({ weights: { giant: 500 * MB } })
+  const probe = pacingProbe({ weights: { giant: 40 * MB } })
   const store = fakeStore({ plan: planOf([{ sessionId: 'giant' }]) })
   const engine = createEngine({
     store,
     probe, bootId: 'b1', now: () => 1,
-    // Room at admission: 4000 - 500 used - 880 reserve = 2620 MB, while the transcript needs about
-    // 3000 MB of heap once parsed: the current reading is not the question, the upcoming bytes are.
-    heapStats: () => ({ usedMB: 500, limitMB: 4000 }),
+    // Room at admission: 4000 - 3000 used - 880 reserve = 120 MB, while the transcript needs about
+    // 240 MB of heap once parsed: the current reading is not the question, the upcoming bytes are.
+    heapStats: () => ({ usedMB: 3000, limitMB: 4000 }),
     log: () => {},
   })
   const outcome = await engine.resume()
@@ -302,17 +302,19 @@ test('the thresholds come from the heap this process has, not from one machine',
   assert.equal(large.heavyMB, 24, 'an 8 GB cap can carry a bigger transcript before it needs the process alone')
   assert.equal(large.reserveMB, 1536)
   assert.equal(large.concurrency, 2)
-  assert.deepEqual(large.derived, { heavyMB: true, reserveMB: true, concurrency: true })
+  assert.equal(large.rowCeilingMB, 98, 'an 8 GB cap still refuses to hydrate a transcript past about 100 MB')
+  assert.deepEqual(large.derived, { heavyMB: true, reserveMB: true, concurrency: true, rowCeilingMB: true })
   const small = await run(2048)
   assert.equal(small.heavyMB, 8)
   assert.equal(small.reserveMB, 451)
   assert.equal(small.concurrency, 1, 'a 2 GB cap restores one session at a time')
+  assert.equal(small.rowCeilingMB, 32, 'the ceiling follows the cap down to its floor')
   // An explicit config value is a person's decision and beats the derivation.
   const pinned = await run(2048, { restoreHeavyMB: 5, restoreHeapReserveMB: 900, restoreConcurrency: 3 })
   assert.equal(pinned.heavyMB, 5)
   assert.equal(pinned.reserveMB, 900)
   assert.equal(pinned.concurrency, 3)
-  assert.deepEqual(pinned.derived, { heavyMB: false, reserveMB: false, concurrency: false })
+  assert.deepEqual(pinned.derived, { heavyMB: false, reserveMB: false, concurrency: false, rowCeilingMB: true })
 })
 
 function planWithGoal(sessions, goal) {
@@ -502,4 +504,34 @@ test('the drain allowance stops a queue that keeps restoring nothing', async () 
     'a zero allowance never starts another round',
   )
   assert.ok(lines.some((line) => line.includes('restore drain stopped')), 'the stop is reported in the log')
+})
+
+test('a transcript past the per-row ceiling is never hydrated automatically', async () => {
+  const MB = 1048576
+  // The 167 MB log that took the 2026-11-05 host from a roomy heap to its 8 GB cap. No reading taken
+  // before the mount can price it, so the size alone is the refusal and a restart is not the advice.
+  const probe = pacingProbe({ weights: { giant: 167 * MB } })
+  const store = fakeStore({ plan: planOf([{ sessionId: 'giant' }]) })
+  const engine = createEngine({
+    store, probe, bootId: 'b1', now: () => 1,
+    heapStats: () => ({ usedMB: 400, limitMB: 8384 }),
+    log: () => {},
+  })
+  const first = await engine.resume()
+  assert.equal(first.status, 'partial')
+  assert.deepEqual(probe.calls.filter(([kind]) => kind === 'session'), [], 'a transiently roomy heap must not wave a giant through')
+  const scheduling = engine.describe().scheduling
+  assert.equal(scheduling.needsHand, 1, 'the page can say a session has to be opened by hand')
+  assert.equal(scheduling.restartRecommended, null, 'restarting does not make this row affordable')
+  assert.equal(scheduling.deferred[0].reason, 'transcript is too large to restore here')
+  // The next process would otherwise pick the same row up again and die exactly the same way.
+  const again = createEngine({
+    store, probe, bootId: 'b2', now: () => 2,
+    heapStats: () => ({ usedMB: 400, limitMB: 8384 }),
+    log: () => {},
+  })
+  const second = await again.resume()
+  assert.equal(second.status, 'partial')
+  assert.deepEqual(probe.calls.filter(([kind]) => kind === 'session'), [], 'a held giant stays held across boots')
+  assert.equal(again.describe().scheduling.needsHand, 1)
 })
