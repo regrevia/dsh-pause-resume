@@ -151,7 +151,8 @@ test('a large row is deferred instead of mounted when the host heap has no room 
     log: () => {},
   })
   const outcome = await engine.resume()
-  assert.equal(outcome.status, 'partial', 'a press that mounted nothing did not finish the work')
+  assert.equal(outcome.status, 'blocked', 'a press the heap refused says so, so the page is not silent')
+  assert.equal(outcome.reason, 'heap')
   assert.equal(probe.calls.some(([kind]) => kind === 'session'), false, 'nothing is mounted into a heap that is already full')
   assert.notEqual(store.state.plan, null, 'held-back work must survive the press that could not mount it')
   assert.equal(store.state.plan.status, 'partial')
@@ -197,7 +198,7 @@ test('a held row is mounted by the next process, and only then is the plan spent
     log: () => {},
   })
   const first = await tight.resume()
-  assert.equal(first.status, 'partial')
+  assert.equal(first.status, 'blocked', 'nothing was mounted, so the press reports the hold, not a partial restore')
   assert.notEqual(store.state.plan, null, 'the press that could not mount anything leaves the plan on disk')
   assert.equal(store.state.result, null)
 

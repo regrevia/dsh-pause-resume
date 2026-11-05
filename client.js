@@ -152,6 +152,11 @@ window.__ModuleLoader__.load({
       position: 'relative', // ui-copy-ignore
     }
 
+    // Small evidence beside the glyph, never a second control: it explains a state the icon cannot.
+    const NOTE_STYLE = {
+      fontSize: 12, lineHeight: 1.3, whiteSpace: 'nowrap', marginInlineEnd: 6, // ui-copy-ignore
+      color: 'var(--dsh-color-text-secondary, rgba(127,127,127,0.9))', pointerEvents: 'none', // ui-copy-ignore
+    }
     const SPIN_STYLE = { display: 'inline-flex', animation: 'dsh-pr-spin 900ms linear infinite' } // ui-copy-ignore
 
     function icon(paths, extra) {
@@ -186,6 +191,19 @@ window.__ModuleLoader__.load({
       const timedOut = Array.isArray(wrapUp.timedOut) ? wrapUp.timedOut.length : 0
       const completed = Array.isArray(wrapUp.completed) ? wrapUp.completed.length : 0
       return timedOut > 0 && completed === 0 ? COPY.receipt : null
+    }
+
+    /**
+     * The one state the button cannot express on its own: the press measured the room, every row was
+     * refused for memory, and the same keypress will measure the same heap again. The glyph stays a
+     * play triangle because nothing is running, so the sentence has to sit next to it — a tooltip
+     * only shows on hover, and a press that looks like it did nothing is the complaint this answers.
+     */
+    function blockedNoteOf(state) {
+      if (state === null || state === undefined || typeof state !== 'object') return ''
+      const held = Array.isArray(state?.scheduling?.deferred) ? state.scheduling.deferred.length : 0
+      if (held > 0 && (state.error === 'restore-blocked-heap' || typeof state?.scheduling?.restartRecommended?.at === 'string')) return COPY.restartHeld
+      return ''
     }
 
     /** The one sentence behind the button, in the tooltip only: the button itself stays a glyph. */
@@ -354,6 +372,7 @@ window.__ModuleLoader__.load({
           ? { ...BUTTON_STYLE, opacity: 1, background: 'var(--dsh-color-surface-hover, rgba(127,127,127,0.14))' }
           : BUTTON_STYLE
 
+      const note = busy ? '' : blockedNoteOf(state)
       const glyph = busy ? SPIN_GLYPH : action === 'continue' ? CONTINUE_GLYPH : action === 'resume' ? PLAY_GLYPH : PAUSE_GLYPH
       const label = busy ? (state.phase === 'pausing' ? COPY.pausing : COPY.busy) : action === 'continue' ? COPY.cont : action === 'resume' ? COPY.resume : COPY.pause
       const hint = hintOf(state)
@@ -368,7 +387,7 @@ window.__ModuleLoader__.load({
         title: hint === '' ? label : `${label} · ${hint}`,
         onMouseEnter: () => setHover(true),
         onMouseLeave: () => setHover(false),
-      }, glyph)
+      }, note === '' ? [glyph] : [h('span', { key: 'note', style: NOTE_STYLE }, note), glyph])
     }
 
     const definition = {
@@ -385,6 +404,7 @@ window.__ModuleLoader__.load({
     // A pure function of the button state, for tests: kept non-enumerable so the loader still walks the
     // two keys a plugin definition has and nothing else.
     Object.defineProperty(definition, 'receiptOf', { value: receiptOf })
+    Object.defineProperty(definition, 'blockedNoteOf', { value: blockedNoteOf })
     return definition
   },
 })

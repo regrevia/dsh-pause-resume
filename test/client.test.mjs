@@ -160,3 +160,18 @@ test('the receipt is the tooltip once a pause finished, and a continue press sti
   const cont = { ...IDLE, action: 'continue', pendingContinue: { count: 2, attention: 0 }, ...wrapUp(['s1'], []) }
   assert.equal(render([cont, false, false]).props.title, 'Continue unfinished work · 2 tasks stopped, press to continue')
 })
+
+test('a restore the heap refused says on the page why pressing again will not help', () => {
+  const { render, module } = harness({ calls: [], answer: IDLE })
+  const blocked = {
+    ...IDLE,
+    action: 'resume',
+    error: 'restore-blocked-heap',
+    scheduling: { deferred: [{ sessionId: 'a' }], restartRecommended: { at: '2026-01-01T00:00:00.000Z', usedMB: 3900, limitMB: 4000 } },
+  }
+  assert.equal(module.blockedNoteOf(blocked), 'Restart to continue what was held back')
+  assert.equal(module.blockedNoteOf(IDLE), '')
+  const button = render([blocked, false, false])
+  assert.equal(button.props['aria-label'], 'Resume')
+  assert.ok(JSON.stringify(button.children).includes('Restart to continue what was held back'), 'the sentence is on the page, not only in the tooltip')
+})
