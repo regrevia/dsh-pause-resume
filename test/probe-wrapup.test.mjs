@@ -13,10 +13,28 @@ function registry(services) {
  * `finishAfterMs`, which is the only way the probe can tell a wrap-up that landed from one that did
  * not.
  */
-function harness({ agents = [], goals = {}, jobs = {}, keepRunning = false, finishAfterMs = null, promptThrows = false, noPrompt = false } = {}) {
+function harness({ agents = [], goals = {}, jobs = {}, keepRunning = false, finishAfterMs = null, promptThrows = false, noPrompt = false, endKind = 'completed' } = {}) {
   const calls = []
   const live = new Map(agents.map((agent) => [agent.id, agent]))
   const views = new Map(Object.entries(goals))
+  // The shipped Harness records a turn end when a turn finishes; without that record a wrap-up has
+  // no proof of how it ended, which is exactly what these tests need to distinguish.
+  const ends = new Map()
+  const finish = (id) => {
+    const agent = live.get(id)
+    if (agent === undefined) return
+    // A running phase reports the open turn as `turn`; finishing it closes that same turn. Only an
+    // idle agent opens a new number.
+    const open = agent.phase.kind === 'running' && Number.isSafeInteger(agent.phase.turn)
+    const turn = open ? agent.phase.turn : (agent.phase.lastTurn ?? 0) + 1
+    agent.status = 'idle'
+    agent.phase = { kind: 'idle', lastTurn: turn }
+    const kind = endKind !== null && typeof endKind === 'object' ? (endKind[id] ?? 'completed') : endKind
+    if (kind === null) return
+    const rows = ends.get(id) ?? []
+    rows.push({ turn, kind })
+    ends.set(id, rows)
+  }
   const jobRows = new Map()
   for (const rows of Object.values(jobs)) for (const row of rows) jobRows.set(row.id, row)
   const services = {
@@ -60,14 +78,13 @@ function harness({ agents = [], goals = {}, jobs = {}, keepRunning = false, fini
         else row.status = 'killed'
       },
     },
+    sessionLog: {
+      readTurnEnds: async (id) => ends.get(id) ?? [],
+    },
     sessionController: {
       cancel: async (request) => {
         calls.push(['cancel', request.sessionId])
-        const agent = live.get(request.sessionId)
-        if (keepRunning !== true && agent !== undefined) {
-          agent.status = 'idle'
-          agent.phase.lastTurn = (agent.phase.lastTurn ?? 0) + 1
-        }
+        if (keepRunning !== true) finish(request.sessionId)
       },
       resolveAgent: async (sessionId) => {
         calls.push(['resolveAgent', sessionId])
@@ -89,10 +106,7 @@ function harness({ agents = [], goals = {}, jobs = {}, keepRunning = false, fini
       agent.status = 'running'
       const wait = finishAfterMs !== null && typeof finishAfterMs === 'object' ? finishAfterMs[request.sessionId] : finishAfterMs
       if (Number.isFinite(wait) && wait >= 0) {
-        setTimeout(() => {
-          agent.status = 'idle'
-          agent.phase.lastTurn = (agent.phase.lastTurn ?? 0) + 1
-        }, wait)
+        setTimeout(() => finish(request.sessionId), wait)
       }
       return { accepted: true }
     }
@@ -129,6 +143,8 @@ test('a wrap-up window steers first, and a turn that ends there is not cancelled
     windowMs: 200,
     steered: ['s1', 's2'],
     completed: ['s1'],
+    unclean: [],
+    unverified: [],
     timedOut: ['s2'],
     unavailable: null,
     retracted: [],
@@ -150,6 +166,8 @@ test('a steer that throws falls back to the normal cancel instead of failing the
     windowMs: 120,
     steered: [],
     completed: [],
+    unclean: [],
+    unverified: [],
     // A steer the runtime refused was never delivered, so it is not a timed-out wrap-up either: the
     // session falls straight through to the normal cancel.
     timedOut: [],
@@ -261,4 +279,36 @@ test('a completion caused by a pause wrap-up is not treated as the original task
   const prompts = owedRig.fake.calls.filter((call) => call[0] === 'prompt')
   assert.equal(prompts.length, 1)
   assert.equal(prompts[0][1], 's1')
+})
+
+test('a wrap-up whose turn ended in error is not reported as the finished answer', async () => {
+  const fake = harness({ agents: [{ id: 's1', status: 'running', phase: { lastTurn: 2 } }], finishAfterMs: { s1: 20 }, endKind: 'error' })
+  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const stopped = await probe.stop(probe.live(), { wrapUpMs: 300, planId: 'p-error' })
+
+  assert.deepEqual(stopped.wrapUp.completed, [], 'an error is not a completed wrap-up')
+  assert.deepEqual(stopped.wrapUp.unclean, [{ sessionId: 's1', kind: 'error' }])
+  assert.deepEqual(stopped.wrapUp.timedOut, [], 'the turn did end, so the press need not wait it out')
+})
+
+test('a wrap-up is unverified when no turn end was recorded at all', async () => {
+  const fake = harness({ agents: [{ id: 's1', status: 'running', phase: { lastTurn: 2 } }], finishAfterMs: { s1: 20 }, endKind: null })
+  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const stopped = await probe.stop(probe.live(), { wrapUpMs: 300, planId: 'p-none' })
+
+  assert.deepEqual(stopped.wrapUp.completed, [])
+  assert.deepEqual(stopped.wrapUp.unverified, [{ sessionId: 's1', detail: 'no turn end was recorded' }])
+  assert.deepEqual(stopped.wrapUp.timedOut, ['s1'], 'without evidence the press falls back, it does not guess')
+})
+
+test('a steer into an already-open turn is verified when that same turn ends cleanly', async () => {
+  // The steer joins the open turn instead of opening a new one, so the end carries the same number
+  // the baseline saw. Only the baseline's open flag distinguishes it from a stale end.
+  const fake = harness({ agents: [{ id: 's1', status: 'running', phase: { kind: 'running', turn: 5, lastTurn: 4 } }], finishAfterMs: { s1: 20 } })
+  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const stopped = await probe.stop(probe.live(), { wrapUpMs: 300, planId: 'p-open' })
+
+  assert.deepEqual(stopped.wrapUp.completed, ['s1'])
+  assert.deepEqual(stopped.wrapUp.unclean, [])
+  assert.deepEqual(stopped.wrapUp.unverified, [])
 })

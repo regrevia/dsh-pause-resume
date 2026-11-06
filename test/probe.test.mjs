@@ -1225,3 +1225,60 @@ test('listResidue() records the live parent of a running child', () => {
     { sessionId: 's2', lastTurn: 5, parent: 's1' },
   ])
 })
+
+test('stop() ends a captured child through its parent route, never the Session API', async () => {
+  // A child turn is refused by `sessionController.cancel` by design. The press must route it through
+  // the parent it captured, and it must use the parent the row names — a wrong parent stops someone
+  // else's work or nothing at all.
+  const calls = []
+  const child = { id: 'c1', status: 'running', phase: { kind: 'running', turn: 5, lastTurn: 5 }, session: { header: { parentSession: 'p1', origin: 'subagent' } } }
+  const parent = { id: 'p1', status: 'idle', phase: { lastTurn: 2 } }
+  const fake = registry({
+    agents: { get: (id) => (id === 'p1' ? parent : id === 'c1' ? child : undefined), list: () => [parent, child] },
+    sessionController: { cancel: async () => { calls.push(['cancel']); throw new Error('session "c1" is owned by subagent routing') } },
+    subagents: {
+      interrupt: async (sessionId, options) => {
+        calls.push(['interrupt', sessionId, options.parentSessionId])
+        child.status = 'idle'
+        child.phase = { kind: 'idle', lastTurn: 5 }
+        return { accepted: true }
+      },
+    },
+  })
+  const probe = createProbe(fake)
+  const current = probe.live()
+  assert.equal(current.sessions.find((row) => row.sessionId === 'c1').parent, 'p1')
+  const stopped = await probe.stop(current, {})
+  assert.deepEqual(stopped.canceled, ['c1'])
+  assert.deepEqual(stopped.unknown, [])
+  assert.deepEqual(calls, [['interrupt', 'c1', 'p1']], 'the child goes through its own parent, not cancel')
+})
+
+test('stop() of a child without a parent route says so instead of reporting it stopped', async () => {
+  // No parent anywhere: the child cannot be cancelled, and a pause that claims it did would leave a
+  // turn running behind a label that says stopped.
+  const child = { id: 'c1', status: 'running', phase: { kind: 'running', turn: 5, lastTurn: 5 } }
+  const fake = registry({
+    agents: { get: () => child, list: () => [child] },
+    sessionController: { cancel: async () => { throw new Error('session "c1" is owned by subagent routing') } },
+  })
+  const probe = createProbe(fake)
+  const stopped = await probe.stop(probe.live(), {})
+  assert.deepEqual(stopped.canceled, [])
+  assert.ok(stopped.unknown.some((row) => /c1/u.test(row)), 'the turn that could not be reached is named')
+})
+
+test('a stop that cannot name its session does not print the id prefix twice', async () => {
+  // Host ids already read like `session-<uuid>`. A failure line that repeats the prefix is harder to
+  // match against the row it is about, which is the only thing an attention line is for.
+  const child = { id: 'session-abc12345', status: 'running', phase: { kind: 'running', turn: 2, lastTurn: 2 } }
+  const fake = registry({
+    agents: { get: () => child, list: () => [child] },
+    sessionController: { cancel: async () => { throw new Error('session "session-abc12345" is owned by subagent routing') } },
+  })
+  const probe = createProbe(fake)
+  const stopped = await probe.stop(probe.live(), {})
+  const line = stopped.unknown.find((row) => /abc12345/u.test(row))
+  assert.ok(line, 'the failed stop is reported')
+  assert.ok(line.startsWith('session abc12345:'), 'the id is named once')
+})

@@ -2055,3 +2055,103 @@ test('a partial press replaces the captured crash count with only the rows still
   // describe() counts deduped rows, so s2's restored row never returns as attention.
   assert.equal(probe.calls.filter((call) => call[0] === 'prompt').length, 0)
 })
+
+test('a stop whose result cannot be re-read is partial, not paused', async () => {
+  // The probe's report is not the fact either way: if the live list is unreadable afterwards, the
+  // press cannot claim the work stopped. The third state must not collapse into a clean pause.
+  const live = { readable: true, sessions: [{ sessionId: 's1', running: true, lastTurn: 3 }], goals: [], jobs: [] }
+  const base = fakeProbe(live, { canceled: ['s1'] })
+  let stopped = false
+  const probe = {
+    ...base,
+    live: () => (stopped ? { readable: false, sessions: [], goals: [], jobs: [] } : live),
+    stop: async (current) => {
+      stopped = true
+      return base.stop(current)
+    },
+  }
+  const { engine, store } = engineFor({ probe })
+  const result = await engine.pause({})
+  const plan = store.state.plan
+  assert.equal(result.status, 'partial')
+  assert.equal(plan.status, 'partial')
+  assert.equal(plan.stopped.stopVerified, false, 'an uncheckable stop is never verified')
+  assert.ok(plan.stopped.unknown.includes('s1'), 'the sessions it could not read are named')
+  assert.ok(plan.attention.some((row) => /could not be read/.test(row.detail ?? '')), 'the person is told why')
+})
+
+test('a wrap-up that ended in error is recorded as such, not as the finished answer', async () => {
+  const live = { readable: true, sessions: [{ sessionId: 's1', running: true, lastTurn: 3 }], goals: [], jobs: [] }
+  const base = fakeProbe(live, {
+    canceled: ['s1'],
+    wrapUp: {
+      windowMs: 1000,
+      steered: ['s1'],
+      completed: [],
+      unclean: [{ sessionId: 's1', kind: 'error' }],
+      unverified: [],
+      timedOut: [],
+      unavailable: null,
+      retracted: [],
+      retractUnavailable: [],
+    },
+  })
+  let stopped = false
+  const probe = {
+    ...base,
+    live: () => (stopped ? { readable: true, sessions: [{ sessionId: 's1', running: false, lastTurn: 4 }], goals: [], jobs: [] } : live),
+    stop: async (current) => {
+      stopped = true
+      return base.stop(current)
+    },
+  }
+  const { engine, store } = engineFor({ probe })
+  const outcome = await engine.pause({})
+  const plan = store.state.plan
+  const row = plan.sessions.find((entry) => entry.sessionId === 's1')
+  assert.equal(row.wrapUp, 'ended-error', 'the row records how the wrap-up really ended')
+  assert.deepEqual(plan.wrapUp.unclean, [{ sessionId: 's1', kind: 'error' }])
+  assert.ok(
+    plan.attention.some((entry) => entry.kind === 'session' && entry.id === 's1' && /ended as error/.test(entry.detail ?? '')),
+    'the session is named so the person can open it',
+  )
+  assert.equal(outcome.status, 'paused', 'the work did stop; only the wrap-up answer is in doubt')
+})
+
+test('a second press stops what the first press reported as still running', async () => {
+  // The first press is honest about a turn it could not stop. The person presses again: the survivor
+  // is captured as live work and stopped, and only then may the pause call itself clean.
+  const live = {
+    readable: true,
+    sessions: [{ sessionId: 's1', running: true, lastTurn: 3 }, { sessionId: 's2', running: true, lastTurn: 4 }],
+    goals: [],
+    jobs: [],
+  }
+  const base = fakeProbe(live)
+  const frames = []
+  let presses = 0
+  const probe = {
+    ...base,
+    stop: async (current) => {
+      presses += 1
+      frames.push(current.sessions.filter((row) => row.running === true).map((row) => row.sessionId))
+      // The first press reaches both turns, but only one of them really ends. Reporting the survivor
+      // as cancelled is exactly the lie the cross-check exists to catch.
+      const canceled = presses === 1 ? ['s1', 's2'] : ['s2']
+      const settled = presses === 1 ? ['s1'] : ['s1', 's2']
+      live.sessions = live.sessions.map((row) => (settled.includes(row.sessionId) ? { ...row, running: false } : row))
+      return { canceled, unknown: [], pausedGoals: [], goalErrors: [], killedJobs: [], jobErrors: [], stillRunning: [] }
+    },
+  }
+  const { engine, store } = engineFor({ probe })
+  const first = await engine.pause({})
+  assert.equal(first.status, 'partial')
+  assert.ok(store.state.plan.attention.some((row) => row.kind === 'session' && row.id === 's2'), 'the survivor is named')
+
+  const second = await engine.pause({})
+  assert.equal(second.status, 'paused', 'with the survivor stopped the pause is clean')
+  assert.equal(presses, 2)
+  assert.deepEqual(frames[1], ['s2'], 'the second press captures the work that is actually still live')
+  assert.equal(store.state.plan.status, 'paused')
+  assert.equal(store.state.plan.sessions.find((row) => row.sessionId === 's2').intent, 'continue', 'the survivor still owes a continuation')
+})

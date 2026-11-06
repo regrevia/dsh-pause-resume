@@ -73,7 +73,7 @@ function pauseProbe() {
 }
 
 function wrapUpReport(overrides = {}) {
-  return { windowMs: 3000, steered: [], completed: [], timedOut: [], unavailable: null, retracted: [], retractUnavailable: [], ...overrides }
+  return { windowMs: 3000, steered: [], completed: [], unclean: [], unverified: [], timedOut: [], unavailable: null, retracted: [], retractUnavailable: [], ...overrides }
 }
 
 function engineOf({ store = fakeStore(), probe = pauseProbe(), ...options } = {}) {
@@ -162,6 +162,8 @@ test('a turn that finished inside the window keeps a continuation marker, a canc
     windowMs: 3000,
     steered: ['a', 'b', 'c'],
     completed: ['a'],
+    unclean: [],
+    unverified: [],
     timedOut: ['b', 'c'],
     unavailable: 'no-session',
     retracted: [],

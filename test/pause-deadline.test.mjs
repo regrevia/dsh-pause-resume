@@ -40,6 +40,17 @@ function harness({
   onPrompt = null,
 } = {}) {
   const calls = []
+  // How each finished turn ended, shaped like the Harness turn-end records.
+  const ends = new Map()
+  const finish = (id) => {
+    const agent = live.get(id)
+    if (agent === undefined) return
+    agent.status = 'idle'
+    agent.phase.lastTurn = (agent.phase.lastTurn ?? 0) + 1
+    const rows = ends.get(id) ?? []
+    rows.push({ turn: agent.phase.lastTurn, kind: 'completed' })
+    ends.set(id, rows)
+  }
   const delivered = []
   const removed = []
   const inbox = [{ ...USER_MESSAGE }]
@@ -78,16 +89,16 @@ function harness({
       get: () => undefined,
       kill: () => {},
     },
+    sessionLog: {
+      readTurnEnds: async (id) => ends.get(id) ?? [],
+    },
     sessionController: {
       cancel: async (request) => {
         calls.push({ kind: 'cancel', sessionId: request.sessionId, at: Date.now() })
         const agent = live.get(request.sessionId)
         // The official cancel stops the turn and keeps the pending inbox; a hung fake keeps the
         // status `running` on purpose so the press has to bound its own wait.
-        if (keepRunning !== true && agent !== undefined) {
-          agent.status = 'idle'
-          agent.phase.lastTurn = (agent.phase.lastTurn ?? 0) + 1
-        }
+        if (keepRunning !== true) finish(request.sessionId)
       },
       resolveAgent: async (sessionId) => {
         const existing = live.get(sessionId)
@@ -120,8 +131,7 @@ function harness({
         const wait = finishAfterMs !== null && typeof finishAfterMs === 'object' ? finishAfterMs[request.sessionId] : finishAfterMs
         if (Number.isFinite(wait) && wait >= 0) {
           setTimeout(() => {
-            agent.status = 'idle'
-            agent.phase.lastTurn = (agent.phase.lastTurn ?? 0) + 1
+            finish(request.sessionId)
           }, wait)
         }
         return { accepted: true }
@@ -152,6 +162,8 @@ test('a turn that never ends returns inside one window plus one cancel grace', a
     windowMs: 3000,
     steered: ['s1'],
     completed: [],
+    unclean: [],
+    unverified: [],
     timedOut: ['s1'],
     unavailable: null,
     retracted: [],

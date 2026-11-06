@@ -33,6 +33,17 @@ function harness({ agents = [], finishAfterMs = null, keepRunning = false } = {}
   const removed = []
   const live = new Map()
   const inboxes = new Map()
+  // The Harness records how each turn ended; `completed` is what a landed wrap-up looks like.
+  const ends = new Map()
+  const finish = (id) => {
+    const agent = live.get(id)
+    if (agent === undefined) return
+    agent.status = 'idle'
+    agent.phase.lastTurn = (agent.phase.lastTurn ?? 0) + 1
+    const rows = ends.get(id) ?? []
+    rows.push({ turn: agent.phase.lastTurn, kind: 'completed' })
+    ends.set(id, rows)
+  }
   let seq = 0
   for (const row of agents) {
     const agent = { id: row.id, status: row.status ?? 'running', phase: { lastTurn: 3 }, mounted: true }
@@ -75,16 +86,16 @@ function harness({ agents = [], finishAfterMs = null, keepRunning = false } = {}
       get: () => undefined,
       kill: () => {},
     },
+    sessionLog: {
+      readTurnEnds: async (id) => ends.get(id) ?? [],
+    },
     sessionController: {
       cancel: async (request) => {
         calls.push({ kind: 'cancel', sessionId: request.sessionId })
         const agent = live.get(request.sessionId)
         // A cancelled turn ends at once; a hung fake keeps `running` so the press has to bound its
         // own wait, which is what the timed-out cases need.
-        if (keepRunning !== true && agent !== undefined) {
-          agent.status = 'idle'
-          agent.phase.lastTurn = (agent.phase.lastTurn ?? 0) + 1
-        }
+        if (keepRunning !== true) finish(request.sessionId)
       },
       prompt: async (request) => {
         calls.push({
@@ -104,10 +115,7 @@ function harness({ agents = [], finishAfterMs = null, keepRunning = false } = {}
         }
         const wait = finishAfterMs !== null && typeof finishAfterMs === 'object' ? finishAfterMs[request.sessionId] : finishAfterMs
         if (Number.isFinite(wait) && wait >= 0) {
-          setTimeout(() => {
-            agent.status = 'idle'
-            agent.phase.lastTurn = (agent.phase.lastTurn ?? 0) + 1
-          }, wait)
+          setTimeout(() => finish(request.sessionId), wait)
         }
         return { accepted: true }
       },
@@ -127,6 +135,8 @@ test('a timed-out steer is taken back, and the message queued before it is left 
     windowMs: 120,
     steered: ['s1'],
     completed: [],
+    unclean: [],
+    unverified: [],
     timedOut: ['s1'],
     unavailable: null,
     retracted: ['s1'],
