@@ -552,3 +552,76 @@ test('a transcript past the per-row ceiling is never hydrated automatically', as
   assert.deepEqual(probe.calls.filter(([kind]) => kind === 'session'), [], 'a held giant stays held across boots')
   assert.equal(again.describe().scheduling.needsHand, 1)
 })
+
+test('a saved restart advice dies with the paced row it was written for', () => {
+  // The live page once kept saying "work was held back for the next restart" long after the paced
+  // session had landed, because the only row still held was the oversized one a restart cannot open.
+  // Advice is about work a new process could mount; a hand row is not that work.
+  const now = Date.parse('2026-01-01T00:10:00.000Z')
+  const planFor = (manual) => {
+    const plan = planOf([{ sessionId: 'giant' }])
+    plan.status = 'partial'
+    plan.restore = {
+      at: '2026-01-01T00:00:00.000Z', attempts: 1, rounds: 2,
+      deferred: [{ sessionId: 'giant', kind: 'session', reason: 'held back by memory', ...(manual ? { manual: true } : {}) }],
+    }
+    plan.restartRecommended = {
+      at: '2026-01-01T00:00:00.000Z', usedMB: 5000, limitMB: 9408,
+      reason: 'work was held back for the next restart',
+    }
+    return plan
+  }
+  const engineFor = (plan) => createEngine({
+    store: fakeStore({ plan }),
+    probe: pacingProbe(),
+    bootId: 'b1', now: () => now,
+    heapStats: () => ({ usedMB: 5000, limitMB: 9408 }),
+    log: () => {},
+  })
+  assert.equal(engineFor(planFor(true)).describe().scheduling.restartRecommended, null, 'a restart cannot open a hand row')
+  // Control: a row a new process could mount keeps the advice, so the rule is about the row and not
+  // about advice being dropped for being old.
+  assert.notEqual(engineFor(planFor(false)).describe().scheduling.restartRecommended, null)
+})
+
+test('a pause pressed over an expired record archives it and says why', async () => {
+  // The page offered ▶ while the person pressed pause: the only record was a crash plan 100 h old,
+  // and nothing said the press had retired it. A pause now answers with the archive instead of
+  // silence, and leaves nothing behind for the next boot to read.
+  const T = Date.parse('2026-10-30T05:00:00.000Z')
+  const probe = pacingProbe()
+  const store = fakeStore()
+  store.writePending({ ...planOf([{ sessionId: 'old-1' }]), createdAt: new Date(T - 100 * 3600000).toISOString() })
+  const engine = createEngine({ store, probe, bootId: 'b1', now: () => T, log: () => {} })
+  const outcome = await engine.pause()
+  assert.equal(outcome.status, 'expired')
+  assert.equal(outcome.ageHours, 100)
+  assert.equal(outcome.counts.sessions, 1)
+  assert.equal(store.state.pending, null, 'the retired record is not left for the next boot')
+  assert.equal(store.state.result.status, 'expired')
+  assert.equal(probe.calls.length, 0, 'a pause has nothing to mount')
+  assert.equal(engine.describe().expired.archived, true)
+})
+
+test('advice stops the moment the rows it was written for have landed', async () => {
+  // Live 0.9.8 page: heap 5848/9408 MB, nothing deferred, and the header still asked for a restart
+  // because the previous round had saved the advice and no later round recomputed it. A second
+  // round with room to work must take that sentence back.
+  const MB = 1048576
+  let limitMB = 1000
+  const probe = pacingProbe({ weights: { big: 40 * MB } })
+  const store = fakeStore({ plan: planOf([{ sessionId: 'big' }]) })
+  const engine = createEngine({
+    store, probe, bootId: 'b1', now: () => 1,
+    heapStats: () => ({ usedMB: 950, limitMB }),
+    log: () => {},
+  })
+  const first = await engine.resume()
+  assert.notEqual(first.status, 'resumed', `a full heap must not mount the row: ${first.status}`)
+  assert.notEqual(engine.describe().scheduling.restartRecommended, null)
+  limitMB = 9408
+  const second = await engine.resume()
+  assert.notEqual(second.status, 'partial', `the held row must land once there is room: ${second.status}`)
+  assert.equal(engine.describe().scheduling.deferred.length, 0)
+  assert.equal(engine.describe().scheduling.restartRecommended, null, 'a landed row must not keep the advice alive')
+})
