@@ -2155,3 +2155,55 @@ test('a second press stops what the first press reported as still running', asyn
   assert.equal(store.state.plan.status, 'paused')
   assert.equal(store.state.plan.sessions.find((row) => row.sessionId === 's2').intent, 'continue', 'the survivor still owes a continuation')
 })
+
+test('live work keeps the pause reachable while an unfinished plan waits', async () => {
+  // Field report: after a restart the header showed a play glyph on live work and the press did
+  // nothing, because a leftover partial plan always answered `resume` from the action ladder. The
+  // person could not stop the work they were watching. A plan is not a reason to hide the pause.
+  const plan = {
+    version: 3, planId: 'pause-12', source: 'pause', status: 'partial',
+    sessions: [{ sessionId: 's1', intent: 'mount', epoch: 0, running: false, lastTurn: 2 }], goals: [], jobs: [], attention: [],
+    restore: { at: '2026-11-06T09:23:53.616Z', attempts: 6, rounds: 2, deferred: [{ kind: 'session', sessionId: 's1', reason: 'host heap is near its limit (7959 MB of 9408 MB)' }] },
+  }
+  const store = fakeStore({ plan })
+  const live = { sessions: [{ sessionId: 's1', running: true, lastTurn: 2 }], goals: [], jobs: [], readable: true }
+  const { engine } = engineFor({ store, probe: fakeProbe(live) })
+  const state = engine.describe()
+  assert.equal(state.action, 'pause', 'a held restore cannot pin the play glyph over live work')
+  assert.equal(state.phase, 'idle')
+
+  // A plan the restore already tried `maxRestoreAttempts` times is the same dead end even when it
+  // carries no memory hold: the live turn must still be stoppable.
+  const liveForAttempts = { sessions: [{ sessionId: 's1', running: true, lastTurn: 2 }], goals: [], jobs: [], readable: true }
+  const spent = fakeStore({ plan: { ...plan, restore: { at: '2026-11-06T09:23:53.616Z', attempts: 6, handoff: ['s1'] } } })
+  const earlier = engineFor({ store: spent, probe: fakeProbe(liveForAttempts) })
+  assert.equal(earlier.engine.describe().action, 'pause', 'a restore out of attempts cannot pin the play glyph')
+
+  // A plan whose rows the restore has not parked yet still gets the resume first.
+  const waiting = fakeStore({ plan: { ...plan, restore: undefined } })
+  const waitingLive = { sessions: [{ sessionId: 's1', running: true, lastTurn: 2 }], goals: [], jobs: [], readable: true }
+  const second = engineFor({ store: waiting, probe: fakeProbe(waitingLive) })
+  assert.equal(second.engine.describe().action, 'resume')
+})
+
+test('a handoff whose owner is gone is recorded and does not keep the plan open forever', async () => {
+  // The plan that pinned the header on 2026-11-06 had one `handoff: job` row whose owner session had
+  // been deleted. Every resume parked it as `pending` again, the plan never closed, and the play
+  // glyph stayed forever. A missing owner is a fact to record, not an obligation to retry.
+  const plan = {
+    version: 3, planId: 'crash-1', source: 'crash', status: 'paused',
+    sessions: [{ sessionId: 'gone-1', intent: 'mount', running: false, lastTurn: null, handoff: 'job', handoffPhase: 'pending', job: { id: 'bash-7', command: 'build', lastOutput: null } }],
+    goals: [], jobs: [{ id: 'bash-7', owner: 'gone-1', command: 'build', stop: { status: 'stopped' } }], attention: [],
+  }
+  const store = fakeStore({})
+  store.state.pending = plan
+  const probe = fakeProbe()
+  probe.restoreSession = async () => ({ status: 'skipped', detail: 'no session' })
+  const { engine } = engineFor({ store, probe })
+  assert.equal(engine.describe().action, 'resume')
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'resumed', 'a handoff nobody can deliver must not block the plan')
+  const attention = (outcome.summary.attention ?? []).map((row) => (typeof row === 'string' ? row : row?.detail ?? row?.id ?? ''))
+  assert.ok(attention.some((text) => text.includes('gone-1')), `the lost owner is named: ${JSON.stringify(attention)}`)
+  assert.equal(store.state.pending, null, 'the plan is spent, so the next restart does not offer it again')
+})

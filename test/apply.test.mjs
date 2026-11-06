@@ -84,7 +84,7 @@ test('a previous process running.json is offered as resume before any press', as
   writeFileSync(join(dir, 'running.json'), JSON.stringify({
     version: 2,
     bootId: '111-foreign',
-    updatedAt: 1000,
+    updatedAt: Date.now(),
     sessions: [{ sessionId: 's9' }],
   }))
   const { call } = await mount({}, home)

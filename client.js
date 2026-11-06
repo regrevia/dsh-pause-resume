@@ -263,6 +263,8 @@ window.__ModuleLoader__.load({
       const [state, setState] = React.useState(EMPTY)
       const [hover, setHover] = React.useState(false)
       const [pressing, setPressing] = React.useState(false)
+      /** This turn's press came back without a mount: marked until the next press replaces it. */
+      const [reported, setReported] = React.useState(false)
       const mounted = React.useRef(true)
       /** Each answer carries a number: a slow reply may never overwrite a newer one. */
       const seq = React.useRef(0)
@@ -360,8 +362,10 @@ window.__ModuleLoader__.load({
         pressKind.current = action
         inflight.current = controller
         setPressing(true)
+        setReported(false)
         try {
           const answer = await press(action, controller)
+          if (mounted.current) setReported(pressedOf(answer))
           const next = answer ?? (await readState())
           if (mounted.current) {
             if (next !== null) {
@@ -390,7 +394,7 @@ window.__ModuleLoader__.load({
 
       // A press the heap refused is the one state that needs saying without a word: the glyph stays
       // the play triangle, so a dot marks it and the tooltip carries the sentence.
-      const held = busy === false && heldOf(state)
+      const held = busy === false && disabled === false && (heldOf(state) || reported)
       const glyph = busy ? SPIN_GLYPH : action === 'continue' ? CONTINUE_GLYPH : action === 'resume' ? PLAY_GLYPH : PAUSE_GLYPH
       const label = busy ? (state.phase === 'pausing' ? t('pausing') : t('busy')) : action === 'continue' ? t('cont') : action === 'resume' ? t('resume') : t('pause')
       const hint = hintOf(state)
@@ -422,6 +426,16 @@ window.__ModuleLoader__.load({
       return held > 0 && typeof state?.scheduling?.restartRecommended?.at === 'string'
     }
 
+    /**
+     * A press that did not land cleanly has to leave a trace on the button: the glyph cannot change
+     * on the same turn, and a play triangle that stayed identical read as "my press did nothing".
+     * Empty answers (paused, resumed, continued) are their own visible result and stay unmarked.
+     */
+    function pressedOf(answer) {
+      const status = answer !== null && typeof answer === 'object' ? answer.status : null
+      return status === 'partial' || status === 'blocked' || status === 'failed' || status === 'expired' // ui-copy-ignore
+    }
+
     const definition = {
       inject: ['slots', 'locale'], // ui-copy-ignore
       apply(ctx) {
@@ -449,6 +463,7 @@ window.__ModuleLoader__.load({
     // two keys a plugin definition has and nothing else.
     Object.defineProperty(definition, 'receiptOf', { value: receiptOf })
     Object.defineProperty(definition, 'heldOf', { value: heldOf })
+    Object.defineProperty(definition, 'pressedOf', { value: pressedOf })
     Object.defineProperty(definition, 'setLanguage', { value: (lang) => { translate = localTranslate(lang) } })
     return definition
   },

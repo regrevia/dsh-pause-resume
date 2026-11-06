@@ -396,6 +396,23 @@ test('a crash record from days ago is archived instead of mounted', async () => 
   assert.equal(state.action, 'none', 'there is nothing left to press')
 })
 
+test('the header itself retires a crash record that is too old to restore', async () => {
+  const T = Date.parse('2026-10-30T05:00:00.000Z')
+  const probe = pacingProbe()
+  const store = fakeStore()
+  store.writePending({ ...planOf([{ sessionId: 'old-1' }]), createdAt: new Date(T - 100 * 3600000).toISOString() })
+  const engine = createEngine({ store, probe, bootId: 'b1', now: () => T, log: () => {} })
+  const state = engine.describe()
+  assert.equal(state.expired.ageHours, 100, 'the page already reports the record as retired')
+  assert.equal(state.expired.archived, false, 'reading the page must not write files')
+  assert.equal(state.action, 'none', 'the play glyph is not offered for a record that only gets archived')
+  assert.equal(store.state.pending.status !== undefined, true, 'the record is still on disk for the press')
+  const outcome = await engine.resume()
+  assert.equal(outcome.status, 'expired')
+  assert.equal(store.state.pending, null, 'the press archives it')
+  assert.equal(engine.describe().expired.archived, true)
+})
+
 test('an interruption still recent enough to be owed is restored, not archived', async () => {
   const T = Date.parse('2026-10-30T05:00:00.000Z')
   const probe = pacingProbe()

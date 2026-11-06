@@ -173,6 +173,8 @@ test('a transcript too large to restore automatically asks to be opened by hand'
   // is the only way the button can say that, because the header has room for one 28px glyph.
   assert.equal(module.heldOf(manual), true, 'a session waiting to be opened by hand is marked')
   assert.equal(module.heldOf({ ...manual, scheduling: { deferred: [], needsHand: 0, restartRecommended: null } }), false)
+  assert.equal(module.pressedOf({ status: 'partial' }), true, 'a press that did not land is marked')
+  assert.equal(module.pressedOf({ status: 'resumed' }), false, 'a press that landed needs no mark')
   const held = render([manual, false, false])
   assert.equal(held.props.style.width, 28)
   assert.equal(JSON.stringify(held.children).includes('borderRadius'), true, 'the mark is a dot')
