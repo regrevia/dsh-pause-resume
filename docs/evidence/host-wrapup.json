@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-07T09:02:59.948Z",
+  "generatedAt": "2026-11-07T12:47:52.453Z",
   "kind": "host-wrapup",
   "plugin": {
     "name": "dsh-pause-resume",
@@ -26,9 +26,9 @@
         "lastRole": "user",
         "lastText": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: \"<repo>\".\n\nC",
         "held": true,
-        "heldAt": "2026-11-07T09:02:58.863Z",
-        "releasedAt": "2026-11-07T09:02:59.469Z",
-        "finishedAt": "2026-11-07T09:02:59.469Z"
+        "heldAt": "2026-11-07T12:47:51.701Z",
+        "releasedAt": "2026-11-07T12:47:52.104Z",
+        "finishedAt": "2026-11-07T12:47:52.105Z"
       },
       {
         "n": 2,
@@ -38,7 +38,7 @@
         "held": false,
         "heldAt": null,
         "releasedAt": null,
-        "finishedAt": "2026-11-07T09:02:58.948Z"
+        "finishedAt": "2026-11-07T12:47:51.784Z"
       },
       {
         "n": 3,
@@ -48,7 +48,7 @@
         "held": false,
         "heldAt": null,
         "releasedAt": null,
-        "finishedAt": "2026-11-07T09:02:59.702Z"
+        "finishedAt": "2026-11-07T12:47:52.339Z"
       }
     ]
   },
@@ -59,38 +59,38 @@
   "steps": [
     {
       "step": "profile-created",
-      "at": "2026-11-07T09:02:57.439Z",
+      "at": "2026-11-07T12:47:50.300Z",
       "ok": true,
       "code": 0,
       "profile": "wrapup",
       "from": "web",
-      "stderr": "[1107/170257.220137:ERROR:electron/shell/app/node_main.cc:154] Node.js environment variables are disabled because this process is invoked by other apps.\n"
+      "stderr": "[1107/204750.075354:ERROR:electron/shell/app/node_main.cc:154] Node.js environment variables are disabled because this process is invoked by other apps.\n"
     },
     {
       "step": "plugin-installed",
-      "at": "2026-11-07T09:02:57.880Z",
+      "at": "2026-11-07T12:47:50.679Z",
       "ok": true,
       "code": 0,
       "plugin": "<repo>",
-      "stderr": "[1107/170257.479627:ERROR:electron/shell/app/node_main.cc:154] Node.js environment variables are disabled because this process is invoked by other apps.\n"
+      "stderr": "[1107/204750.341051:ERROR:electron/shell/app/node_main.cc:154] Node.js environment variables are disabled because this process is invoked by other apps.\n"
     },
     {
       "step": "model-overridden",
-      "at": "2026-11-07T09:02:57.884Z",
+      "at": "2026-11-07T12:47:50.684Z",
       "ok": true,
       "provider": "mock",
       "api": "openai-completions",
-      "baseURL": "http://127.0.0.1:53147/v1"
+      "baseURL": "http://127.0.0.1:56457/v1"
     },
     {
       "step": "host-ready",
-      "at": "2026-11-07T09:02:58.610Z",
+      "at": "2026-11-07T12:47:51.427Z",
       "ok": true,
-      "url": "http://127.0.0.1:53148"
+      "url": "http://127.0.0.1:56458"
     },
     {
       "step": "live-turn-running",
-      "at": "2026-11-07T09:02:58.768Z",
+      "at": "2026-11-07T12:47:51.586Z",
       "ok": true,
       "phase": "idle",
       "liveSessions": 1,
@@ -103,7 +103,7 @@
     },
     {
       "step": "wrapup-turn-request",
-      "at": "2026-11-07T09:02:59.873Z",
+      "at": "2026-11-07T12:47:52.381Z",
       "ok": true,
       "after": {
         "n": 3,
@@ -111,7 +111,7 @@
         "lastRole": "user",
         "lastText": "用户要求暂停当前任务。请停止开展新的工作，基于已有信息简短说明已完成内容、未完成内容和继续时的下一步，然后结束本轮。不要为了总结再执行检查、启动工具或创建子任务。",
         "held": false,
-        "at": "2026-11-07T09:02:59.493Z"
+        "at": "2026-11-07T12:47:52.128Z"
       },
       "before": {
         "n": 1,
@@ -121,7 +121,7 @@
     },
     {
       "step": "paused-after-wrapup",
-      "at": "2026-11-07T09:02:59.875Z",
+      "at": "2026-11-07T12:47:52.383Z",
       "ok": true,
       "status": 200,
       "outcomeStatus": "paused",
@@ -150,9 +150,9 @@
     },
     {
       "step": "normal-terminal-state",
-      "at": "2026-11-07T09:02:59.876Z",
+      "at": "2026-11-07T12:47:52.383Z",
       "ok": true,
-      "planId": "pause-mw66e4ls-1",
+      "planId": "pause-mw6efbqa-1",
       "planStatus": "paused",
       "row": {
         "sessionId": "spike-live-turn",
@@ -184,7 +184,7 @@
     },
     {
       "step": "state-shows-wrapup",
-      "at": "2026-11-07T09:02:59.876Z",
+      "at": "2026-11-07T12:47:52.383Z",
       "ok": true,
       "phase": "paused",
       "counts": {
@@ -217,7 +217,7 @@
     },
     {
       "step": "wrapup-reply-in-session",
-      "at": "2026-11-07T09:02:59.880Z",
+      "at": "2026-11-07T12:47:52.386Z",
       "ok": true,
       "sessionId": "spike-live-turn",
       "promptIndex": 10230,
@@ -233,9 +233,9 @@
     "reason": "live Host turn: paused with its model stream held open, then released so the wrap-up turn could answer before the window closed; wrap-up completed in the window, turn ended by itself, plan owes one continuation"
   },
   "timing": {
-    "startedAt": 1794042176986,
-    "finishedAt": "2026-11-07T09:02:59.948Z",
-    "runtimeMs": 2962
+    "startedAt": 1794055669905,
+    "finishedAt": "2026-11-07T12:47:52.453Z",
+    "runtimeMs": 2548
   },
   "verdict": "pass",
   "pause": {
@@ -270,9 +270,9 @@
         "started": []
       }
     },
-    "firedAt": 1794042178768,
-    "releasedAt": 1794042179269,
-    "doneAt": 1794042179872,
+    "firedAt": 1794055671586,
+    "releasedAt": 1794055672088,
+    "doneAt": 1794055672381,
     "releaseResult": true,
     "note": "the press was fired first and the held stream released 500ms later, so the steer arrived at a turn boundary"
   },
@@ -295,7 +295,7 @@
     },
     "scheduling": {
       "heap": {
-        "usedMB": 72,
+        "usedMB": 73,
         "limitMB": 4192
       },
       "heapLimitMB": 4192,
@@ -381,7 +381,7 @@
     "version": "0.9.10"
   },
   "plan": {
-    "planId": "pause-mw66e4ls-1",
+    "planId": "pause-mw6efbqa-1",
     "status": "paused",
     "row": {
       "sessionId": "spike-live-turn",

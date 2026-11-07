@@ -295,3 +295,70 @@ test('a mount-only row is never settled as a hand continuation', () => {
   assert.equal(persisted.sessions.find((row) => row.sessionId === 's2').owedContinue, undefined)
   assert.deepEqual([...store.state.journal.keys()], ['s:s1'])
 })
+
+test('a row parked by the memory gate settles when the person continues it by hand', () => {
+  const parked = owedRow('big', {
+    running: false,
+    lastTurn: 69,
+    deferred: { at: recent(), reason: 'transcript is too large to restore here', park: 'continue', manual: true, needMB: 1214, freeMB: null },
+  })
+  const plan = pausePlan([parked])
+  plan.status = 'partial'
+  plan.restore = {
+    at: recent(), attempts: 0, rounds: 1,
+    deferred: [{ sessionId: 'big', kind: 'session', reason: 'transcript is too large to restore here', needMB: 1214 }],
+  }
+  const store = fakeStore({
+    plan,
+    journal: new Map([['s:big', { status: 'deferred', boot: 'boot-0', epoch: 1, turn: null }]]),
+  })
+  const engine = engineFor({
+    store, services: { sessions: {} },
+    probe: probeFor({ liveSessions: [{ sessionId: 'big', running: true, lastTurn: 70 }] }),
+    handContinuedFn: () => new Map([['big', { present: true, moved: true, running: false, lastTurn: 70 }]]),
+  })
+
+  const view = engine.describe()
+
+  assert.equal(engine.phase, 'idle', 'a park is not a verdict, so a hand continuation can end the plan')
+  assert.equal(view.action, 'pause')
+  assert.equal(store.state.plan, null, 'the hold is gone, so the plan closes on disk')
+  assert.equal(store.state.consumed.summary.rows[0].status, 'satisfied')
+  assert.deepEqual(store.state.appends.map((entry) => [entry.key, entry.status]), [['s:big', 'satisfied']])
+})
+
+test('settling a parked row drops the hold without closing a plan that still owes work', () => {
+  const parked = owedRow('big', {
+    running: false,
+    lastTurn: 69,
+    deferred: { at: recent(), reason: 'transcript is too large to restore here', park: 'continue', manual: true, needMB: 1214, freeMB: null },
+  })
+  const plan = pausePlan([owedRow('s1'), parked])
+  plan.status = 'partial'
+  plan.restore = {
+    at: recent(), attempts: 0, rounds: 1,
+    deferred: [{ sessionId: 'big', kind: 'session', reason: 'transcript is too large to restore here', needMB: 1214 }],
+  }
+  const store = fakeStore({
+    plan,
+    journal: new Map([['s:big', { status: 'deferred', boot: 'boot-0', epoch: 1, turn: null }]]),
+  })
+  const engine = engineFor({
+    store, services: { sessions: {} },
+    handContinuedFn: () => new Map([
+      ['s1', { present: true, moved: false, running: false, lastTurn: 3 }],
+      ['big', { present: true, moved: true, running: false, lastTurn: 70 }],
+    ]),
+  })
+
+  assert.equal(engine.describe().action, 'resume')
+
+  const persisted = store.state.plan
+  assert.ok(persisted !== null, 'the row that still owes a continuation keeps the plan open')
+  const reopened = persisted.sessions.find((row) => row.sessionId === 'big')
+  assert.equal(reopened.owedContinue, false, 'the person did that work')
+  assert.equal(reopened.deferred, undefined, 'no hold is left on a row that no longer needs one')
+  assert.deepEqual(persisted.restore.deferred, [], 'the state endpoint must stop reporting a hold that is over')
+  assert.equal(persisted.sessions.find((row) => row.sessionId === 's1').owedContinue, true)
+  assert.deepEqual(store.state.appends.map((entry) => [entry.key, entry.status]), [['s:big', 'satisfied']])
+})
