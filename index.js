@@ -30,6 +30,14 @@ const BUTTON_HEADER = 'x-dsh-pause-resume'
 const BOOT_KEY = Symbol.for('dsh-pause-resume.boot')
 const LIVENESS_MS = 400
 
+/**
+ * Starting work while a pause is finishing is the one thing the wrap-up window must not allow: the
+ * press promised that everything which can stop will stop, and a spawn ordered in that window would
+ * become work the plan never captured, running behind a button that says paused. Ordinary tools and
+ * cleanup calls still go through, so a turn can finish its sentence.
+ */
+const WRAP_BLOCKED = new Set(['subagent', 'subagent_fork', 'workflow', 'schedule_create'])
+
 /** A page this machine may have opened. A public name that resolves here is the rebinding case. */
 const LOCAL_ADDRESS =
   /^(127\.\d+\.\d+\.\d+|localhost|\[::1\]|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|[a-z0-9-]+\.local)(:\d+)?$/u
@@ -419,6 +427,32 @@ export function apply(ctx, config = {}) {
   let disposeRoutes = () => {}
   let disposeStream = () => {}
   let disposeTurns = () => {}
+  let disposeWrapGuard = () => {}
+  /**
+   * The window exists to let a turn answer, not to let it order more work. The engine owns the fact
+   * (`phase === 'pausing'` is set before the stop starts and cleared when it returns), so this guard
+   * reads that instead of guessing from the clock. It only ever refuses; every other call is handed
+   * to the remaining policy with `next()`.
+   */
+  if (typeof ctx.on === 'function') {
+    try {
+      const off = ctx.on('tools/pre-execute', (exec, next) => {
+        if (disposed) return next()
+        if (engineRef?.phase !== 'pausing') return next()
+        const name = typeof exec?.name === 'string' ? exec.name : ''
+        if (WRAP_BLOCKED.has(name)) {
+          return { kind: 'deny', reason: 'the task is being wrapped up: new work would not be paused' } // ui-copy-ignore
+        }
+        if (name === 'bash' && exec?.arguments?.run_in_background === true) {
+          return { kind: 'deny', reason: 'the task is being wrapped up: a new background job would not be paused' } // ui-copy-ignore
+        }
+        return next()
+      })
+      if (typeof off === 'function') disposeWrapGuard = off
+    } catch (error) {
+      log(`cannot install the wrap-up guard: ${error?.message ?? error}`)
+    }
+  }
   const cleanup = () => {
     disposed = true
     try {
@@ -433,6 +467,11 @@ export function apply(ctx, config = {}) {
     }
     try {
       disposeLedger()
+    } catch {
+      /* the listener may already be gone */
+    }
+    try {
+      disposeWrapGuard()
     } catch {
       /* the listener may already be gone */
     }

@@ -305,3 +305,138 @@ test('goal-only crash residue goes through the real plan reader and restores the
     cleanup()
   }
 })
+
+
+/*
+ * End-to-end scenarios: the real store, a real restart and the real resume loop. A fake probe
+ * supplies the stop outcome so each test owns exactly what the window observed, but everything
+ * after the press (which plan is written, what the next process reads, whether the task comes back)
+ * runs through shipped code.
+ */
+
+const cleanWindow = {
+  windowMs: 200,
+  steered: ['s1'],
+  completed: ['s1'],
+  unclean: [],
+  unverified: [],
+  timedOut: [],
+  interrupted: [],
+  unavailable: null,
+  retracted: [],
+  retractUnavailable: [],
+}
+
+test('A: a clean wrap-up survives the restart and the same task continues once', async () => {
+  const { dir, cleanup } = tempDir()
+  try {
+    const live = { readable: true, sessions: [{ sessionId: 's1', running: true, lastTurn: 3 }], goals: [], jobs: [] }
+    const first = boot(dir, harness({ live, stop: { wrapUp: cleanWindow } }))
+    const paused = await first.engine.pause()
+    assert.equal(paused.status, 'paused')
+    // The proof of the reply is on disk before the process can die.
+    const disk = JSON.parse(fs.readFileSync(join(dir, 'snapshot.json'), 'utf8'))
+    assert.deepEqual(disk.wrapUp.completed, ['s1'])
+    assert.deepEqual(disk.sessions.map((row) => row.wrapUp), ['completed'])
+
+    const next = boot(dir, harness())
+    const hydrated = await next.engine.hydrate()
+    assert.equal(hydrated.phase, 'paused')
+    const resumed = await next.engine.resume()
+    assert.equal(resumed.status, 'resumed')
+    assert.deepEqual(resumed.summary.restored, ['session s1'])
+    assert.deepEqual(next.probe.calls.filter((call) => call[0] === 'session'), [['session', 's1', 'continue', 4]])
+    // The task came back exactly once: a second process does not re-run it.
+    const again = boot(dir, harness())
+    assert.equal((await again.engine.hydrate()).phase, 'idle')
+  } finally {
+    cleanup()
+  }
+})
+
+test('B: a wrap-up that could not prove an answer is stored honestly and the task still comes back', async () => {
+  const { dir, cleanup } = tempDir()
+  try {
+    const live = { readable: true, sessions: [{ sessionId: 's1', running: true, lastTurn: 7 }], goals: [], jobs: [] }
+    const failedWindow = {
+      windowMs: 200,
+      steered: ['s1'],
+      completed: [],
+      unclean: [],
+      unverified: [{ sessionId: 's1', detail: 'the turn completed without an answer' }],
+      timedOut: ['s1'],
+      interrupted: [],
+      unavailable: null,
+      retracted: [],
+      retractUnavailable: ['s1'],
+    }
+    const first = boot(dir, harness({ live, stop: { wrapUp: failedWindow } }))
+    const paused = await first.engine.pause()
+    assert.equal(paused.status, 'paused')
+    const disk = JSON.parse(fs.readFileSync(join(dir, 'snapshot.json'), 'utf8'))
+    assert.deepEqual(disk.wrapUp.completed, [])
+    assert.deepEqual(disk.wrapUp.unverified, [{ sessionId: 's1', detail: 'the turn completed without an answer' }])
+    assert.deepEqual(disk.wrapUp.retractUnavailable, ['s1'])
+    // A turn without an answer is not a clean stop, and the row says so.
+    assert.equal(disk.sessions[0].wrapUp, 'unverified')
+
+    const next = boot(dir, harness())
+    await next.engine.hydrate()
+    const resumed = await next.engine.resume()
+    assert.equal(resumed.status, 'resumed')
+    // The failed wrap-up never lost the work: the same session continues from the turn it stopped on.
+    assert.deepEqual(next.probe.calls.filter((call) => call[0] === 'session'), [['session', 's1', 'continue', 8]])
+  } finally {
+    cleanup()
+  }
+})
+
+test('C: a paused tree restores every branch once and never starts a child twice', async () => {
+  const { dir, cleanup } = tempDir()
+  try {
+    const live = {
+      readable: true,
+      sessions: [
+        { sessionId: 'root', running: true, lastTurn: 5 },
+        { sessionId: 'a', running: true, lastTurn: 2, parentSessionId: 'root' },
+        { sessionId: 'a1', running: true, lastTurn: 1, parentSessionId: 'a' },
+        { sessionId: 'b', running: true, lastTurn: 4, parentSessionId: 'root' },
+      ],
+      goals: [],
+      jobs: [],
+    }
+    const treeWindow = {
+      windowMs: 200,
+      steered: ['root'],
+      completed: ['root'],
+      unclean: [],
+      unverified: [],
+      timedOut: [],
+      interrupted: [
+        { sessionId: 'a', parent: 'root' },
+        { sessionId: 'a1', parent: 'a' },
+        { sessionId: 'b', parent: 'root' },
+      ],
+      unavailable: null,
+      retracted: [],
+      retractUnavailable: [],
+    }
+    const first = boot(dir, harness({ live, stop: { wrapUp: treeWindow } }))
+    const paused = await first.engine.pause()
+    assert.equal(paused.status, 'paused')
+    const disk = JSON.parse(fs.readFileSync(join(dir, 'snapshot.json'), 'utf8'))
+    assert.equal(disk.sessions.length, 4)
+    assert.deepEqual(disk.wrapUp.completed, ['root'])
+    assert.deepEqual(disk.wrapUp.interrupted.map((row) => row.sessionId).sort(), ['a', 'a1', 'b'])
+
+    const next = boot(dir, harness())
+    await next.engine.hydrate()
+    const resumed = await next.engine.resume()
+    assert.equal(resumed.status, 'resumed')
+    const restored = next.probe.calls.filter((call) => call[0] === 'session')
+    assert.deepEqual(restored.map((call) => call[1]).sort(), ['a', 'a1', 'b', 'root'])
+    assert.equal(new Set(restored.map((call) => call[1])).size, 4)
+  } finally {
+    cleanup()
+  }
+})

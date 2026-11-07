@@ -34,6 +34,16 @@ function harness({ agents = [], finishAfterMs = null, keepRunning = false } = {}
   const live = new Map()
   const inboxes = new Map()
   // The Harness records how each turn ended; `completed` is what a landed wrap-up looks like.
+  const watchers = new Map()
+  const watchTurn = (sessionId, onEvent) => {
+    const set = watchers.get(sessionId) ?? new Set()
+    set.add(onEvent)
+    watchers.set(sessionId, set)
+    return () => set.delete(onEvent)
+  }
+  const emit = (sessionId, event) => {
+    for (const onEvent of watchers.get(sessionId) ?? []) onEvent(event)
+  }
   const ends = new Map()
   const finish = (id) => {
     const agent = live.get(id)
@@ -43,6 +53,8 @@ function harness({ agents = [], finishAfterMs = null, keepRunning = false } = {}
     const rows = ends.get(id) ?? []
     rows.push({ turn: agent.phase.lastTurn, kind: 'completed' })
     ends.set(id, rows)
+    emit(id, { type: 'assistant/message', data: { turn: agent.phase.lastTurn, step: 0, message: { role: 'assistant', content: [{ type: 'text', text: '收尾完成' }] } } })
+    emit(id, { type: 'turn/end', data: { turn: agent.phase.lastTurn, reason: { kind: 'completed' } } })
   }
   let seq = 0
   for (const row of agents) {
@@ -121,14 +133,14 @@ function harness({ agents = [], finishAfterMs = null, keepRunning = false } = {}
       },
     },
   }
-  return { services, registry: registry(services), calls, delivered, removed, live, inboxes }
+  return { services, registry: registry(services), calls, delivered, removed, live, inboxes, watchTurn }
 }
 
 const cancels = (fake) => fake.calls.filter((call) => call.kind === 'cancel').map((call) => call.sessionId)
 
 test('a timed-out steer is taken back, and the message queued before it is left alone', async () => {
   const fake = harness({ agents: [{ id: 's1', queued: [USER_MESSAGE] }], keepRunning: true })
-  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 120, planId: 'p1' })
 
   assert.deepEqual(stopped.wrapUp, {
@@ -138,6 +150,7 @@ test('a timed-out steer is taken back, and the message queued before it is left 
     unclean: [],
     unverified: [],
     timedOut: ['s1'],
+    interrupted: [],
     unavailable: null,
     retracted: ['s1'],
     retractUnavailable: [],
@@ -153,7 +166,7 @@ test('a timed-out steer is taken back, and the message queued before it is left 
 
 test('a turn that ends inside the window keeps its steer and asks for no removal', async () => {
   const fake = harness({ agents: [{ id: 's1', queued: [USER_MESSAGE] }], finishAfterMs: { s1: 20 } })
-  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 300, planId: 'p1' })
 
   assert.deepEqual(stopped.wrapUp.completed, ['s1'])
@@ -172,7 +185,7 @@ test('a build with no readable queue cannot retract, and the press still stops',
       { id: 's2', queue: 'no-remove', queued: [USER_MESSAGE] },
     ],
   })
-  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 120, planId: 'p1' })
 
   assert.deepEqual(stopped.wrapUp.timedOut.slice().sort(), ['s1', 's2'])
@@ -192,7 +205,7 @@ test('of two sessions only the one that timed out is retracted', async () => {
     ],
     finishAfterMs: { s1: 20 },
   })
-  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 300, planId: 'p2' })
 
   assert.deepEqual(stopped.wrapUp.completed, ['s1'])

@@ -225,6 +225,7 @@ test('a log written with a UTF-8 BOM and CRLF is read, not discarded', async () 
     assert.deepEqual(await probe.latestTurnEnd(sessionId), {
       end: { turn: 2, kind: 'interrupted', seq: null, failure: null, cause: null },
       openTurn: null,
+      reply: null,
     })
   } finally {
     await cleanup()
@@ -241,6 +242,7 @@ test('a torn final frame is dropped while the frames before it still answer', as
     assert.deepEqual(await probeFor(home).latestTurnEnd(sessionId), {
       end: { turn: 4, kind: 'completed', seq: null, failure: null, cause: null },
       openTurn: null,
+      reply: null,
     })
   } finally {
     await cleanup()

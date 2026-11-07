@@ -73,7 +73,7 @@ function pauseProbe() {
 }
 
 function wrapUpReport(overrides = {}) {
-  return { windowMs: 3000, steered: [], completed: [], unclean: [], unverified: [], timedOut: [], unavailable: null, retracted: [], retractUnavailable: [], ...overrides }
+  return { windowMs: 3000, steered: [], completed: [], unclean: [], unverified: [], timedOut: [], interrupted: [], unavailable: null, retracted: [], retractUnavailable: [], ...overrides }
 }
 
 function engineOf({ store = fakeStore(), probe = pauseProbe(), ...options } = {}) {
@@ -165,6 +165,7 @@ test('a turn that finished inside the window keeps a continuation marker, a canc
     unclean: [],
     unverified: [],
     timedOut: ['b', 'c'],
+    interrupted: [],
     unavailable: 'no-session',
     retracted: [],
     retractUnavailable: [],
@@ -303,4 +304,39 @@ test('the engine reads its own snapshot from disk-shaped storage without a real 
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('a child interrupt is persisted as an interrupt, and it does not become a second continuation', async () => {
+  // The parent owns the resume obligation for work its children were doing. Marking the child too
+  // would let one press continue the same task twice, so the child is recorded as interrupted and
+  // deliberately left without `owedContinue`.
+  const store = fakeStore()
+  const probe = pauseProbe()
+  probe.liveSessions = [
+    { sessionId: 'root', running: true, lastTurn: 2 },
+    { sessionId: 'kid', running: true, lastTurn: 1, parent: 'root' },
+  ]
+  // The real interrupt ends the child's open turn, so the post-stop read must not show it running.
+  const settle = probe.stop
+  probe.stop = async (current, options) => {
+    probe.liveSessions = probe.liveSessions.map((row) => ({ ...row, running: false }))
+    return settle(current, options)
+  }
+  probe.response = {
+    ...emptyStopped(),
+    canceled: ['kid'],
+    wrapUp: wrapUpReport({ steered: ['root'], completed: ['root'], interrupted: [{ sessionId: 'kid', parent: 'root' }] }),
+  }
+  const engine = engineOf({ store, probe })
+  const outcome = await engine.pause()
+  assert.equal(outcome.status, 'paused')
+
+  const persisted = store.state.plan
+  assert.equal(rowOf(persisted, 'root').owedContinue, true)
+  assert.equal(rowOf(persisted, 'root').wrapUp, 'completed')
+  assert.equal(rowOf(persisted, 'kid').wrapUp, 'interrupted')
+  assert.equal(Object.hasOwn(rowOf(persisted, 'kid'), 'owedContinue'), false, 'the parent carries the obligation')
+  assert.deepEqual(persisted.wrapUp.interrupted, [{ sessionId: 'kid', parent: 'root' }])
+  assert.deepEqual(persisted.wrapUp.steered, ['root'])
+  assert.deepEqual(outcome.wrapUp, persisted.wrapUp, 'the press answers with the honest split')
 })

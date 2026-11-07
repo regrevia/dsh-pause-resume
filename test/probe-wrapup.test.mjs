@@ -13,12 +13,22 @@ function registry(services) {
  * `finishAfterMs`, which is the only way the probe can tell a wrap-up that landed from one that did
  * not.
  */
-function harness({ agents = [], goals = {}, jobs = {}, keepRunning = false, finishAfterMs = null, promptThrows = false, noPrompt = false, endKind = 'completed' } = {}) {
+function harness({ agents = [], goals = {}, jobs = {}, keepRunning = false, finishAfterMs = null, promptThrows = false, noPrompt = false, endKind = 'completed', reply = true } = {}) {
   const calls = []
   const live = new Map(agents.map((agent) => [agent.id, agent]))
   const views = new Map(Object.entries(goals))
   // The shipped Harness records a turn end when a turn finishes; without that record a wrap-up has
   // no proof of how it ended, which is exactly what these tests need to distinguish.
+  const watchers = new Map()
+  const watchTurn = (sessionId, onEvent) => {
+    const set = watchers.get(sessionId) ?? new Set()
+    set.add(onEvent)
+    watchers.set(sessionId, set)
+    return () => set.delete(onEvent)
+  }
+  const emit = (sessionId, event) => {
+    for (const onEvent of watchers.get(sessionId) ?? []) onEvent(event)
+  }
   const ends = new Map()
   const finish = (id) => {
     const agent = live.get(id)
@@ -34,6 +44,10 @@ function harness({ agents = [], goals = {}, jobs = {}, keepRunning = false, fini
     const rows = ends.get(id) ?? []
     rows.push({ turn, kind })
     ends.set(id, rows)
+    if (kind === 'completed' && reply !== false) {
+      emit(id, { type: 'assistant/message', data: { turn, step: 0, message: { role: 'assistant', content: [{ type: 'text', text: '收尾完成' }] } } })
+    }
+    emit(id, { type: 'turn/end', data: { turn, reason: { kind } } })
   }
   const jobRows = new Map()
   for (const rows of Object.values(jobs)) for (const row of rows) jobRows.set(row.id, row)
@@ -111,7 +125,7 @@ function harness({ agents = [], goals = {}, jobs = {}, keepRunning = false, fini
       return { accepted: true }
     }
   }
-  return { services, registry: registry(services), calls, live, views }
+  return { services, registry: registry(services), calls, live, views, watchTurn }
 }
 
 /** A session whose turn boundary is readable, like the shipped projection. */
@@ -131,7 +145,7 @@ test('a wrap-up window steers first, and a turn that ends there is not cancelled
     agents: [running('s1', 2), running('s2', 2)],
     finishAfterMs: { s1: 30 },
   })
-  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 200, wrapUpText: '收尾', planId: 'p1' })
 
   const steers = fake.calls.filter((call) => call[0] === 'prompt')
@@ -146,6 +160,7 @@ test('a wrap-up window steers first, and a turn that ends there is not cancelled
     unclean: [],
     unverified: [],
     timedOut: ['s2'],
+    interrupted: [],
     unavailable: null,
     retracted: [],
     // These fake agents expose no inbox, so the stale steer cannot be taken back: the press reports
@@ -160,7 +175,7 @@ test('a wrap-up window steers first, and a turn that ends there is not cancelled
 
 test('a steer that throws falls back to the normal cancel instead of failing the stop', async () => {
   const fake = harness({ agents: [running('s1')], promptThrows: true })
-  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 120, planId: 'p1' })
   assert.deepEqual(stopped.wrapUp, {
     windowMs: 120,
@@ -171,6 +186,7 @@ test('a steer that throws falls back to the normal cancel instead of failing the
     // A steer the runtime refused was never delivered, so it is not a timed-out wrap-up either: the
     // session falls straight through to the normal cancel.
     timedOut: [],
+    interrupted: [],
     unavailable: null,
     // Nothing was steered and nothing timed out, so there is no queued message to take back.
     retracted: [],
@@ -182,7 +198,7 @@ test('a steer that throws falls back to the normal cancel instead of failing the
 
 test('a controller without a steer entry is reported as unavailable, and the cancel still runs', async () => {
   const fake = harness({ agents: [running('s1')], noPrompt: true })
-  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 120, planId: 'p1' })
   assert.equal(stopped.wrapUp.unavailable, 'no-prompt')
   assert.deepEqual(stopped.wrapUp.steered, [])
@@ -194,7 +210,7 @@ test('many sessions share one wrap-up window instead of waiting one window each'
     agents: [running('s1'), running('s2'), running('s3')],
     finishAfterMs: { s1: 150, s2: 150, s3: 150 },
   })
-  const probe = createProbe(fake.registry, { graceMs: 600 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 600 })
   const started = Date.now()
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 300, planId: 'p3' })
   const elapsed = Date.now() - started
@@ -211,7 +227,7 @@ test('a goal is disarmed before it is paused, and the pause still matches the re
     goals: { s1: { id: 'g1', revision: 4, phase: 'active', activation: 'armed' } },
     finishAfterMs: { s1: 20 },
   })
-  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 150, planId: 'p1' })
   assert.deepEqual(stopped.goalsDisarmed, [{ sessionId: 's1', goalId: 'g1' }])
   assert.deepEqual(stopped.pausedGoals, [{ sessionId: 's1', goalId: 'g1', pausedRevision: 5 }])
@@ -225,7 +241,7 @@ test('without a wrap-up window nothing disarms and the old stop order holds', as
     goals: { s1: { id: 'g1', revision: 4, phase: 'active', activation: 'armed' } },
     jobs: { s1: [{ id: 'j1', status: 'running' }] },
   })
-  const probe = createProbe(fake.registry, { graceMs: 200 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 200 })
   const stopped = await probe.stop(probe.live())
   assert.equal(stopped.wrapUp, null)
   assert.deepEqual(stopped.goalsDisarmed, [])
@@ -243,7 +259,7 @@ test('every background job kill is issued before any exit is waited on', async (
       s2: [{ id: 'j2', status: 'running', exitAfterMs: 200 }],
     },
   })
-  const probe = createProbe(fake.registry, { graceMs: 900 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 900 })
   const started = Date.now()
   const stopped = await probe.stop(probe.live(), {})
   const elapsed = Date.now() - started
@@ -257,7 +273,7 @@ test('every background job kill is issued before any exit is waited on', async (
 
 test('a completion caused by a pause wrap-up is not treated as the original task finishing', async () => {
   const plain = turnRig({ lastTurn: 7 })
-  const first = createProbe(plain.fake.registry, { settleMs: 60 })
+  const first = createProbe(plain.fake.registry, { watchTurn: plain.fake.watchTurn, settleMs: 60 })
   const skipped = await first.restoreSession(
     { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 7, continuedTurn: 7 },
     { plan: { planId: 'p1' } },
@@ -267,7 +283,7 @@ test('a completion caused by a pause wrap-up is not treated as the original task
   assert.deepEqual(plain.fake.calls, [])
 
   const owedRig = turnRig({ lastTurn: 7 })
-  const second = createProbe(owedRig.fake.registry, { settleMs: 60 })
+  const second = createProbe(owedRig.fake.registry, { watchTurn: owedRig.fake.watchTurn, settleMs: 60 })
   const owed = await second.restoreSession(
     { sessionId: 's1', intent: 'continue', epoch: 1, lastTurn: 7, continuedTurn: 7, owedContinue: true },
     { plan: { planId: 'p1' } },
@@ -283,7 +299,7 @@ test('a completion caused by a pause wrap-up is not treated as the original task
 
 test('a wrap-up whose turn ended in error is not reported as the finished answer', async () => {
   const fake = harness({ agents: [{ id: 's1', status: 'running', phase: { lastTurn: 2 } }], finishAfterMs: { s1: 20 }, endKind: 'error' })
-  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 300, planId: 'p-error' })
 
   assert.deepEqual(stopped.wrapUp.completed, [], 'an error is not a completed wrap-up')
@@ -293,7 +309,7 @@ test('a wrap-up whose turn ended in error is not reported as the finished answer
 
 test('a wrap-up is unverified when no turn end was recorded at all', async () => {
   const fake = harness({ agents: [{ id: 's1', status: 'running', phase: { lastTurn: 2 } }], finishAfterMs: { s1: 20 }, endKind: null })
-  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 300, planId: 'p-none' })
 
   assert.deepEqual(stopped.wrapUp.completed, [])
@@ -305,10 +321,116 @@ test('a steer into an already-open turn is verified when that same turn ends cle
   // The steer joins the open turn instead of opening a new one, so the end carries the same number
   // the baseline saw. Only the baseline's open flag distinguishes it from a stale end.
   const fake = harness({ agents: [{ id: 's1', status: 'running', phase: { kind: 'running', turn: 5, lastTurn: 4 } }], finishAfterMs: { s1: 20 } })
-  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 300, planId: 'p-open' })
 
   assert.deepEqual(stopped.wrapUp.completed, ['s1'])
   assert.deepEqual(stopped.wrapUp.unclean, [])
   assert.deepEqual(stopped.wrapUp.unverified, [])
+})
+
+test('a child session is never steered, and its interrupt is reported apart from the roots', async () => {
+  // A subagent child is routed by its parent: the session controller cannot deliver a steer to it,
+  // so a prompt that quietly lands nowhere must not be reported as a wrap-up window. The child keeps
+  // the interrupt path, and the report says exactly that.
+  const fake = harness({
+    agents: [
+      { id: 'r1', status: 'running', phase: { lastTurn: 2 }, session: { header: { parentSession: null } } },
+      { id: 'c1', status: 'running', phase: { lastTurn: 1 }, session: { header: { parentSession: 'r1' } } },
+    ],
+    finishAfterMs: { r1: 20 },
+  })
+  // The real host stops a child through the parent-scoped interrupt: no other entry accepts it.
+  fake.services.subagents = {
+    interrupt: async (sessionId, options) => {
+      fake.calls.push(['interrupt', sessionId, options?.parentSessionId ?? null])
+      // A real interrupt ends the child's open turn; a fake that kept it running would be re-asked.
+      const agent = fake.live.get(sessionId)
+      if (agent !== undefined) agent.status = 'idle'
+    },
+  }
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
+  const stopped = await probe.stop(probe.live(), { wrapUpMs: 300, planId: 'p-child' })
+
+  assert.deepEqual(fake.calls.filter((call) => call[0] === 'prompt').map((call) => call[1]), ['r1'])
+  assert.deepEqual(stopped.wrapUp.steered, ['r1'])
+  assert.deepEqual(stopped.wrapUp.completed, ['r1'])
+  assert.deepEqual(stopped.wrapUp.interrupted, [{ sessionId: 'c1', parent: 'r1' }])
+  // Not a steer outcome in any list: an interrupted child never wrote a closing reply.
+  assert.equal(stopped.wrapUp.timedOut.includes('c1'), false)
+  assert.equal(stopped.wrapUp.completed.includes('c1'), false)
+  // The child is still stopped, through the same official entry the crash path uses.
+  assert.deepEqual(fake.calls.filter((call) => call[0] === 'interrupt'), [['interrupt', 'c1', 'r1']])
+  assert.ok(stopped.canceled.includes('c1'), 'the interrupted child is really stopped')
+})
+
+test('a press whose only open work is a child still reports the interruption instead of an empty window', async () => {
+  const fake = harness({
+    agents: [{ id: 'c1', status: 'running', phase: { lastTurn: 1 }, session: { header: { parentSession: 'r1' } } }],
+  })
+  fake.services.subagents = { interrupt: async () => {} }
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
+  const stopped = await probe.stop(probe.live(), { wrapUpMs: 120, planId: 'p-child-only' })
+
+  assert.deepEqual(stopped.wrapUp.steered, [])
+  // Not `no-prompt`: the steer entry exists, it simply has no root to reach.
+  assert.equal(stopped.wrapUp.unavailable, null)
+  assert.deepEqual(stopped.wrapUp.interrupted, [{ sessionId: 'c1', parent: 'r1' }])
+  assert.deepEqual(stopped.canceled, ['c1'])
+})
+
+
+/*
+ * P0-1: a wrap-up is only a success when the answer it asked for is actually there. A turn that
+ * reports `completed` but keeps no assistant text is not the person's reply, and must never be
+ * counted as one; a turn that ended some other way, or whose end cannot be seen at all, is reported
+ * as what it is instead of as a clean stop.
+ */
+
+test('a completed turn whose answer was kept counts as the wrap-up landing', async () => {
+  const fake = harness({ agents: [running('s1')], finishAfterMs: { s1: 20 } })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
+  const stopped = await probe.stop(probe.live(), { wrapUpMs: 200, planId: 'p1' })
+  assert.deepEqual(stopped.wrapUp.completed, ['s1'])
+  assert.deepEqual(stopped.wrapUp.unclean, [])
+  assert.deepEqual(stopped.wrapUp.unverified, [])
+  assert.deepEqual(stopped.wrapUp.timedOut, [])
+  // The answer arrived, so nothing of the press' own message is left behind to take back.
+  assert.deepEqual(stopped.wrapUp.retracted, [])
+  assert.deepEqual(stopped.canceled, [])
+})
+
+test('a completed turn without an answer is downgraded and its queued message taken back', async () => {
+  const fake = harness({ agents: [running('s1')], finishAfterMs: { s1: 20 }, reply: false })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
+  const stopped = await probe.stop(probe.live(), { wrapUpMs: 200, planId: 'p1' })
+  assert.deepEqual(stopped.wrapUp.completed, [])
+  assert.deepEqual(stopped.wrapUp.unclean, [])
+  assert.deepEqual(stopped.wrapUp.unverified, [{ sessionId: 's1', detail: 'the turn completed without an answer' }])
+  // An unconfirmed answer leaves a queued message the person never asked for: it is retracted.
+  assert.deepEqual(stopped.wrapUp.timedOut, ['s1'])
+  assert.deepEqual(stopped.wrapUp.retracted, [])
+  assert.deepEqual(stopped.wrapUp.retractUnavailable, ['s1'])
+})
+
+test('a turn that ends abnormally is unclean, never a landed wrap-up', async () => {
+  const fake = harness({ agents: [running('s1')], finishAfterMs: { s1: 20 }, endKind: 'interrupted' })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
+  const stopped = await probe.stop(probe.live(), { wrapUpMs: 200, planId: 'p1' })
+  assert.deepEqual(stopped.wrapUp.completed, [])
+  assert.deepEqual(stopped.wrapUp.unclean, [{ sessionId: 's1', kind: 'interrupted' }])
+  assert.deepEqual(stopped.wrapUp.unverified, [])
+  // A turn that ended by a real interrupt is not a queued-message case.
+  assert.deepEqual(stopped.wrapUp.timedOut, [])
+})
+
+test('a turn end that cannot be seen at all is unverified, not a landed wrap-up', async () => {
+  const fake = harness({ agents: [running('s1')], finishAfterMs: { s1: 20 }, endKind: null })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
+  const stopped = await probe.stop(probe.live(), { wrapUpMs: 200, planId: 'p1' })
+  assert.deepEqual(stopped.wrapUp.completed, [])
+  assert.deepEqual(stopped.wrapUp.unclean, [])
+  assert.deepEqual(stopped.wrapUp.unverified, [{ sessionId: 's1', detail: 'no turn end was recorded' }])
+  assert.deepEqual(stopped.wrapUp.timedOut, ['s1'])
+  assert.deepEqual(stopped.wrapUp.retractUnavailable, ['s1'])
 })

@@ -41,6 +41,16 @@ function harness({
 } = {}) {
   const calls = []
   // How each finished turn ended, shaped like the Harness turn-end records.
+  const watchers = new Map()
+  const watchTurn = (sessionId, onEvent) => {
+    const set = watchers.get(sessionId) ?? new Set()
+    set.add(onEvent)
+    watchers.set(sessionId, set)
+    return () => set.delete(onEvent)
+  }
+  const emit = (sessionId, event) => {
+    for (const onEvent of watchers.get(sessionId) ?? []) onEvent(event)
+  }
   const ends = new Map()
   const finish = (id) => {
     const agent = live.get(id)
@@ -50,6 +60,8 @@ function harness({
     const rows = ends.get(id) ?? []
     rows.push({ turn: agent.phase.lastTurn, kind: 'completed' })
     ends.set(id, rows)
+    emit(id, { type: 'assistant/message', data: { turn: agent.phase.lastTurn, step: 0, message: { role: 'assistant', content: [{ type: 'text', text: '收尾完成' }] } } })
+    emit(id, { type: 'turn/end', data: { turn: agent.phase.lastTurn, reason: { kind: 'completed' } } })
   }
   const delivered = []
   const removed = []
@@ -138,7 +150,7 @@ function harness({
       },
     },
   }
-  return { services, registry: registry(services), calls, delivered, removed, inbox, live, views }
+  return { services, registry: registry(services), calls, delivered, removed, inbox, live, views, watchTurn }
 }
 
 const running = (id, lastTurn = 3) => ({ id, status: 'running', phase: { lastTurn } })
@@ -151,7 +163,7 @@ const indexOf = (fake, kind) => fake.calls.findIndex((call) => call.kind === kin
 // lib/probe.js:1396-1451 (bounded settle wait, `stillRunning`).
 test('a turn that never ends returns inside one window plus one cancel grace', async () => {
   const fake = harness({ agents: [running('s1', 2)], keepRunning: true })
-  const probe = createProbe(fake.registry)
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn })
   const started = Date.now()
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 3000, wrapUpText: WRAP_TEXT, planId: 'p-hang' })
   const elapsed = Date.now() - started
@@ -165,6 +177,7 @@ test('a turn that never ends returns inside one window plus one cancel grace', a
     unclean: [],
     unverified: [],
     timedOut: ['s1'],
+    interrupted: [],
     unavailable: null,
     retracted: [],
     // This fake agent exposes no inbox, so the press cannot take its own message back and says so.
@@ -184,7 +197,7 @@ test('a turn that never ends returns inside one window plus one cancel grace', a
 test('wrapUpMs 0 or negative disables the window and cancels at once', async () => {
   for (const wrapUpMs of [0, -50]) {
     const fake = harness({ agents: [running('s1')] })
-    const probe = createProbe(fake.registry)
+    const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn })
     const started = Date.now()
     const stopped = await probe.stop(probe.live(), { wrapUpMs, wrapUpText: WRAP_TEXT, planId: 'p-legacy' })
     assert.ok(Date.now() - started < 500, `wrapUpMs ${wrapUpMs} must not open a window`)
@@ -200,7 +213,7 @@ test('wrapUpMs 0 or negative disables the window and cancels at once', async () 
 // lib/probe.js:1160-1187 (a single observe loop over every steered session).
 test('three open turns share one window instead of paying it three times', async () => {
   const fake = harness({ agents: [running('a'), running('b'), running('c')], keepRunning: true })
-  const probe = createProbe(fake.registry)
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn })
   const started = Date.now()
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 3000, wrapUpText: WRAP_TEXT, planId: 'p-shared' })
   const elapsed = Date.now() - started
@@ -225,7 +238,7 @@ test('a goal is disarmed before the window and paused after it with the captured
     goals: { s1: { id: 'g1', revision: 5, phase: 'active', activation: 'armed' } },
     keepRunning: true,
   })
-  const probe = createProbe(fake.registry, { graceMs: 300 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 300 })
   const started = Date.now()
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 200, wrapUpText: WRAP_TEXT, planId: 'p-goal' })
 
@@ -258,7 +271,7 @@ test('a goal revision that moves during the window is reported once, not retried
       views.set(request.sessionId, { ...view, revision: 9 })
     },
   })
-  const probe = createProbe(fake.registry, { graceMs: 200 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 200 })
   let stopped
   await assert.doesNotReject(async () => {
     stopped = await probe.stop(probe.live(), { wrapUpMs: 120, wrapUpText: WRAP_TEXT, planId: 'p-stale' })
@@ -280,7 +293,7 @@ test('a goal revision that moves during the window is reported once, not retried
 // steer is still queued too. The gap is reported as a finding rather than patched into lib/.
 test('a timed-out pause leaves every message alone, including its own steer', async () => {
   const fake = harness({ agents: [running('s1')], keepRunning: true })
-  const probe = createProbe(fake.registry, { graceMs: 150 })
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn, graceMs: 150 })
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 120, wrapUpText: WRAP_TEXT, planId: 'p-inbox' })
 
   assert.deepEqual(stopped.wrapUp.timedOut, ['s1'])
@@ -293,7 +306,7 @@ test('a timed-out pause leaves every message alone, including its own steer', as
 // messages either — no cancel, no removal. Pins lib/probe.js:1158-1187 and 1256-1258.
 test('a wrap-up that lands on its own changes no message at all', async () => {
   const fake = harness({ agents: [running('s1')], finishAfterMs: 20 })
-  const probe = createProbe(fake.registry)
+  const probe = createProbe(fake.registry, { watchTurn: fake.watchTurn })
   const stopped = await probe.stop(probe.live(), { wrapUpMs: 250, wrapUpText: WRAP_TEXT, planId: 'p-done' })
 
   assert.deepEqual(stopped.wrapUp.completed, ['s1'])
