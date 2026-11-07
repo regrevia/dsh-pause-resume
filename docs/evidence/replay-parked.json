@@ -1,0 +1,55 @@
+{
+  "what": "the plan the live Host reported as restore-partial, replayed against this build with the copy of its own snapshot and restore journal",
+  "source": {
+    "snapshotSha256": "5582cb4ee177289b",
+    "journalSha256": "600051d5d1f039de",
+    "bootId": "36540-mw67cl3x"
+  },
+  "before": {
+    "plan": "pause-mw574xbi-1",
+    "status": "partial",
+    "rows": 6,
+    "deferred": [
+      {
+        "sessionId": "session-9e928ff4-8ee9-44ec-800e-3b8605e57205",
+        "needMB": 1077
+      },
+      {
+        "sessionId": "session-1ca8e13b-5b29-4020-9caa-2c580cb5cb6f",
+        "needMB": 1214
+      }
+    ]
+  },
+  "liveAsReadAfterThePersonContinuedThem": [
+    {
+      "sessionId": "session-9e928ff4-8ee9-44ec-800e-3b8605e57205",
+      "running": false,
+      "lastTurn": 95
+    },
+    {
+      "sessionId": "session-1ca8e13b-5b29-4020-9caa-2c580cb5cb6f",
+      "running": false,
+      "lastTurn": 71
+    }
+  ],
+  "after": {
+    "phase": "idle",
+    "action": "none",
+    "error": null,
+    "needsHand": 0,
+    "planLeft": null
+  },
+  "satisfied": [
+    {
+      "key": "s:session-1ca8e13b-5b29-4020-9caa-2c580cb5cb6f",
+      "status": "satisfied",
+      "detail": "continued by hand after the pause"
+    },
+    {
+      "key": "s:session-9e928ff4-8ee9-44ec-800e-3b8605e57205",
+      "status": "satisfied",
+      "detail": "continued by hand after the pause"
+    }
+  ],
+  "resultRecordStatus": "restored"
+}
