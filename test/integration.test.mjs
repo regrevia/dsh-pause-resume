@@ -440,3 +440,39 @@ test('C: a paused tree restores every branch once and never starts a child twice
     cleanup()
   }
 })
+
+test('D: a job that started mid-press is on disk after the restart and reported once', async () => {
+  const { dir, cleanup } = tempDir()
+  try {
+    const live = { readable: true, sessions: [{ sessionId: 's1', running: true, lastTurn: 3 }], goals: [], jobs: [] }
+    // The press saw no job in its capture. One started while it was stopping the session, and the
+    // probe could only ask for its stop without seeing it end. The next process must still know.
+    const first = boot(dir, harness({
+      live,
+      stop: {
+        canceled: ['s1'],
+        jobErrors: ['job j9: stop requested, still running'],
+        jobStates: [{ id: 'j9', owner: 's1', status: 'stopping', detail: 'still running' }],
+        jobHandoff: [{ id: 'j9', owner: 's1', status: 'stopping', detail: 'still running' }],
+        sessions: [{ sessionId: 's1', lastTurn: 4 }],
+      },
+    }))
+    const paused = await first.engine.pause()
+    assert.equal(paused.status, 'partial')
+    const disk = JSON.parse(fs.readFileSync(join(dir, 'snapshot.json'), 'utf8'))
+    // The job row is what a later process reads; the hand-off list is what a person is shown.
+    assert.deepEqual(disk.jobs, [{ id: 'j9', owner: 's1', status: 'running', stop: 'stopping', stopDetail: 'still running' }])
+    assert.deepEqual(disk.stopped.jobHandoff.map((row) => row.id), ['j9'])
+
+    const next = boot(dir, harness())
+    const hydrated = await next.engine.hydrate()
+    assert.equal(hydrated.phase, 'paused')
+    const resumed = await next.engine.resume()
+    assert.equal(resumed.status, 'resumed')
+    // The task itself still comes back, and the job it could not stop is named instead of forgotten.
+    assert.deepEqual(resumed.summary.restored, ['session s1'])
+    assert.deepEqual(resumed.summary.jobsStopped, ['job j9: 正在停止，继续前请先检查'])
+  } finally {
+    cleanup()
+  }
+})

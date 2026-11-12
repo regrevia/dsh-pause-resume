@@ -1735,6 +1735,31 @@ test('pause() writes what each job stop actually achieved onto the job row', asy
   assert.equal(state.counts.jobs, 2)
 })
 
+test('a job that started while the press was stopping is written into the plan, not only reported', async () => {
+  // The capture listed no jobs: this one appeared after the snapshot, so the press could only learn
+  // about it from its own stop. It must reach the job rows on disk, because a row is what the next
+  // process reads; a mention in the attention list alone would vanish with the plan's text.
+  const live = { readable: true, sessions: [{ sessionId: 's1', running: true, lastTurn: 3 }], goals: [], jobs: [] }
+  const probe = fakeProbe(live, {
+    canceled: ['s1'],
+    killedJobs: [],
+    jobErrors: ['job j9: stop requested, still running'],
+    jobStates: [{ id: 'j9', owner: null, status: 'stopping', detail: 'still running' }],
+    jobHandoff: [{ id: 'j9', owner: null, status: 'stopping', detail: 'still running' }],
+  })
+  const store = fakeStore()
+  const { engine } = engineFor({ store, probe })
+  const outcome = await engine.pause()
+  assert.equal(outcome.status, 'partial')
+  const written = store.state.writes.at(-1)
+  assert.deepEqual(written.jobs, [{ id: 'j9', owner: null, status: 'running', stop: 'stopping', stopDetail: 'still running' }])
+  assert.equal(engine.describe().counts.jobs, 1)
+  // A job whose stop was requested is an obligation, not a stopped job: the resume message must say
+  // a person has to look at it rather than announcing it was stopped and not restarted.
+  const resumed = await engine.resume()
+  assert.deepEqual(resumed.summary.jobsStopped, ['job j9: 正在停止，继续前请先检查'])
+})
+
 test('a plan that only owes a job report resumes without starting anything and is spent once', async () => {
   const plan = {
     version: 3, planId: 'p1', source: 'pause', status: 'partial',

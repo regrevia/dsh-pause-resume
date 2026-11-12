@@ -37,6 +37,8 @@ const LIVENESS_MS = 400
  * cleanup calls still go through, so a turn can finish its sentence.
  */
 const WRAP_BLOCKED = new Set(['subagent', 'subagent_fork', 'workflow', 'schedule_create'])
+/** Tools that register a real job when asked. `bash` is POSIX-only and `pwsh` is its Windows twin. */
+const WRAP_JOB_TOOLS = new Set(['bash', 'pwsh', 'terminal_send'])
 
 /** A page this machine may have opened. A public name that resolves here is the rebinding case. */
 const LOCAL_ADDRESS =
@@ -443,7 +445,12 @@ export function apply(ctx, config = {}) {
         if (WRAP_BLOCKED.has(name)) {
           return { kind: 'deny', reason: 'the task is being wrapped up: new work would not be paused' } // ui-copy-ignore
         }
-        if (name === 'bash' && exec?.arguments?.run_in_background === true) {
+        // The shell tool is an alternate, not a name: a profile ships `bash` on POSIX and `pwsh` on
+        // Windows, and both take the same `run_in_background` parameter to register a real job. Keying
+        // the guard on `bash` alone left the only escape hatch open on Windows. The name set covers
+        // every shipped tool that starts a job; the `command` shape catches a shell shipped under
+        // another name without denying unrelated tools that merely accept the parameter.
+        if (exec?.arguments?.run_in_background === true && (WRAP_JOB_TOOLS.has(name) || typeof exec?.arguments?.command === 'string')) {
           return { kind: 'deny', reason: 'the task is being wrapped up: a new background job would not be paused' } // ui-copy-ignore
         }
         return next()

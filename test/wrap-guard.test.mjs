@@ -93,6 +93,13 @@ test('a spawn ordered while the press is finishing is refused, and nothing else 
     assert.equal((await guard({ name: 'workflow', arguments: {} }, allow)).kind, 'deny')
     // Background jobs are the other way work escapes a pause.
     assert.equal((await guard({ name: 'bash', arguments: { run_in_background: true } }, allow)).kind, 'deny')
+    // Windows ships `pwsh` instead of `bash` and takes the same parameter; the same escape must close.
+    assert.equal((await guard({ name: 'pwsh', arguments: { command: 'Start-Sleep 9', run_in_background: true } }, allow)).kind, 'deny')
+    // A persistent terminal is the third shipped way to register a job, and it carries `text`, not
+    // `command`: the name set is what keeps it from slipping through on Windows and POSIX alike.
+    assert.equal((await guard({ name: 'terminal_send', arguments: { sessionId: 't1', text: 'npm test', run_in_background: true } }, allow)).kind, 'deny')
+    // The parameter alone is not a job: a tool that accepts it for its own reasons is still allowed.
+    assert.equal((await guard({ name: 'read', arguments: { path: '/tmp/x', run_in_background: true } }, allow)).kind, 'allow')
     // A turn still has to be able to finish its sentence: ordinary calls are delegated untouched.
     let delegated = 0
     const stillAllowed = await guard({ name: 'bash', arguments: { command: 'ls' } }, async () => {

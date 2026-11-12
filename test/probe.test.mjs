@@ -11,7 +11,7 @@ function registry(services) {
  * itself, the goal service refuses anything that is not that object, and every transition bumps the
  * revision. The fake keeps those three properties because they are the ones the probe depends on.
  */
-function harness({ agents = [], goals = {}, jobs = {}, unownedJobs = [], keepRunning = false } = {}) {
+function harness({ agents = [], goals = {}, jobs = {}, unownedJobs = [], keepRunning = false, onCancel = null } = {}) {
   const calls = []
   const live = new Map(agents.map((agent) => [agent.id, agent]))
   const views = new Map(Object.entries(goals))
@@ -67,6 +67,7 @@ function harness({ agents = [], goals = {}, jobs = {}, unownedJobs = [], keepRun
     sessionController: {
       cancel: async (request) => {
         calls.push(['cancel', request.sessionId])
+        if (onCancel !== null) onCancel(request.sessionId)
         if (keepRunning !== true) {
           const agent = live.get(request.sessionId)
           if (agent !== undefined) {
@@ -99,7 +100,7 @@ function harness({ agents = [], goals = {}, jobs = {}, unownedJobs = [], keepRun
       },
     },
   }
-  return { services, registry: registry(services), calls, live, views }
+  return { services, registry: registry(services), calls, live, views, unownedJobs, jobs }
 }
 
 async function settle(ms) {
@@ -127,8 +128,13 @@ test('live() reads the live registry, active goals and running jobs', () => {
   ])
   // A paused goal is the person's pause, not this press's work.
   assert.deepEqual(live.goals, [{ sessionId: 's1', goalId: 'g1', revision: 4 }])
-  // A job already stopping is on its way out; the press did not start it and must not wait on it.
-  assert.deepEqual(live.jobs.map((job) => job.id), ['j3', 'j1'])
+  // A job already stopping is on its way out: the press did not start it and must not wait on it,
+  // but it is still alive, so the capture reports it with its real status instead of dropping it.
+  assert.deepEqual(live.jobs.map((job) => ({ id: job.id, status: job.status })), [
+    { id: 'j3', status: 'running' },
+    { id: 'j4', status: 'stopping' },
+    { id: 'j1', status: 'running' },
+  ])
 })
 
 test('live() reads the agent inside a listed row, not the row own status', () => {
@@ -787,6 +793,103 @@ test('stop() cancels every open turn in one round trip', async () => {
   assert.equal(peak, 2)
   assert.deepEqual([...stopped.canceled].sort(), ['s1', 's2'])
   assert.deepEqual(stopped.stillRunning, [])
+})
+
+test('stop() records a job that was already stopping instead of pretending it killed it', async () => {
+  const agent = { id: 's1', status: 'running', phase: { lastTurn: 0 } }
+  const killed = []
+  const records = new Map([['j1', { id: 'j1', status: 'stopping' }]])
+  const services = {
+    agents: { get: () => agent, list: () => [agent] },
+    jobs: {
+      list: (owner) => [...records.values()].filter((row) => ((row.owner ?? undefined) === owner)),
+      get: (id) => records.get(id),
+      kill: (id) => {
+        killed.push(id)
+        records.set(id, { ...records.get(id), status: 'killed' })
+      },
+    },
+    sessionController: {
+      cancel: async () => {
+        agent.status = 'idle'
+        agent.phase.lastTurn += 1
+      },
+    },
+  }
+  const probe = createProbe(registry(services), { graceMs: 300 })
+  const stopped = await probe.stop(probe.live())
+  // Nobody kills a request the harness is already unwinding: a second kill could only fail.
+  assert.deepEqual(killed, [])
+  assert.deepEqual(stopped.killedJobs, [])
+  assert.deepEqual(stopped.jobStates, [{ id: 'j1', owner: null, status: 'stopping', detail: 'still stopping when the pause began' }])
+  assert.deepEqual(stopped.jobHandoff.map((row) => row.id), ['j1'])
+  assert.match(stopped.jobErrors.join(' '), /still stopping when the pause began/u)
+})
+
+test('stop() stops a job that appeared after the capture and reports the ones it cannot', async () => {
+  const agent = { id: 's1', status: 'running', phase: { lastTurn: 0 } }
+  const records = new Map([['j1', { id: 'j1', status: 'running', owner: null }]])
+  const killed = []
+  const services = {
+    agents: { get: () => agent, list: () => [agent] },
+    jobs: {
+      list: (owner) => [...records.values()].filter((row) => ((row.owner ?? undefined) === owner)),
+      get: (id) => records.get(id),
+      wait: () => Promise.resolve({ id: 'j1', status: 'killed' }),
+      // The snapshot the press took was empty; these two jobs started while it was stopping sessions.
+      kill: (id) => {
+        killed.push(id)
+        records.set(id, { ...records.get(id), status: 'killed' })
+      },
+    },
+    sessionController: {
+      cancel: async () => {
+        agent.status = 'idle'
+        agent.phase.lastTurn += 1
+        records.set('j2', { id: 'j2', status: 'running' })
+        records.set('j3', { id: 'j3', status: 'running', owner: 's1' })
+      },
+    },
+  }
+  const probe = createProbe(registry(services), { graceMs: 400 })
+  const snapshot = probe.live()
+  assert.deepEqual(snapshot.jobs.map((job) => job.id), ['j1'])
+  const stopped = await probe.stop(snapshot)
+  // Both jobs were started after the capture, so no plan named them yet; they are stopped anyway and
+  // reported by id, which is the only way a plan can say what it left alive.
+  assert.deepEqual([...killed].sort(), ['j1', 'j2', 'j3'])
+  assert.deepEqual(stopped.jobStates.filter((row) => row.status === 'stopped').map((row) => row.id).sort(), ['j1', 'j2', 'j3'])
+  assert.deepEqual(stopped.unknown, [])
+})
+
+test('stop() reports a job it never managed to stop instead of calling the pause clean', async () => {
+  const agent = { id: 's1', status: 'running', phase: { lastTurn: 0 } }
+  const records = new Map([['j9', { id: 'j9', status: 'running' }]])
+  const services = {
+    agents: { get: () => agent, list: () => [agent] },
+    jobs: {
+      list: (owner) => [...records.values()].filter((row) => ((row.owner ?? undefined) === owner)),
+      get: (id) => records.get(id),
+      wait: () => Promise.resolve({ id: 'j9', status: 'running' }),
+      // The stop never takes: the job keeps running for the rest of the press.
+      kill: () => {},
+    },
+    sessionController: {
+      cancel: async () => {
+        agent.status = 'idle'
+        agent.phase.lastTurn += 1
+      },
+    },
+  }
+  const probe = createProbe(registry(services), { graceMs: 300, jobExitMs: 120 })
+  const stopped = await probe.stop(probe.live())
+  assert.deepEqual(stopped.killedJobs, [])
+  assert.deepEqual(stopped.jobStates, [{ id: 'j9', owner: null, status: 'stopping', detail: 'still running' }])
+  // A job whose stop was requested is not an unknown fact: the plan carries it as an obligation.
+  // Silence is the bug this covers, and `jobErrors` plus `jobHandoff` is what breaks the silence.
+  assert.deepEqual(stopped.jobHandoff.map((row) => row.id), ['j9'])
+  assert.deepEqual(stopped.jobErrors, ['job j9: stop requested, still running'])
+  assert.deepEqual(stopped.unknown, [])
 })
 
 test('stop() bounds a cancel that never answers instead of pinning the press forever', async () => {
